@@ -1,0 +1,15 @@
+{
+  "name": "project-starter",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "watchdog": "npx tsx scripts/watchdog.ts",
+    "security": "npx tsx scripts/security.ts",
+    "security:once": "npx tsx scripts/security.ts --once",
+    "stress-test": "npx tsx scripts/stress-test.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0",
+    "typescript": "^5.4.0"
+  }
+}

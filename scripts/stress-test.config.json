@@ -1,0 +1,7 @@
+{
+  "baseUrl": "http://localhost:3000",
+  "users": 100,
+  "concurrency": 20,
+  "scenarios": ["register", "health"],
+  "verbose": false
+}

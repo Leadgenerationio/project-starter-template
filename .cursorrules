@@ -1,0 +1,47 @@
+You are building a web application. Follow all rules in CLAUDE.md.
+
+## IMPORTANT: Keep Docs In Sync
+After any new feature or major change, always update `ARCHITECTURE.md`, `CLAUDE.md`, and `.cursorrules` to reflect the current state. Don't ask — just do it.
+
+## Architecture
+
+<!-- TODO: Fill in your project-specific architecture -->
+
+- **Framework**:
+- **Database**:
+- **Authentication**:
+- **State management**:
+- **Deployment**:
+
+## Key Concepts
+
+<!-- TODO: Fill in project-specific concepts -->
+
+## File Structure
+```
+src/
+  <!-- TODO: Fill in your file structure -->
+```
+
+## When making changes:
+1. Always validate inputs at system boundaries: file sizes before upload, API keys before external calls
+2. Handle partial failures — never throw away successful work because one item failed
+3. Show real progress during long operations (X of Y, not just a spinner)
+4. Remove dead code — grep for unused types/interfaces/exports before finishing
+
+## Watchdog QA Agent
+- `npm run watchdog` — standalone script that continuously tests all endpoints
+- Config: `scripts/watchdog.config.json` (all overridable via `WATCHDOG_*` env vars)
+- Requires `WATCHDOG_EMAIL` / `WATCHDOG_PASSWORD` env vars for authenticated API tests
+- Reports to `watchdog-report.json` (gitignored)
+
+## Security Agent
+- `npm run security` — continuous security audit across 14 categories
+- `npm run security:once` — single scan with exit codes (0=clean, 1=high, 2=critical) for CI
+- Config: `scripts/security.config.json`
+- Reports to `security-report.json` (gitignored)
+
+## Stress Test Agent
+- `npm run stress-test` — simulates N concurrent users performing realistic flows
+- Reports per-endpoint metrics (requests, success%, p50/p95/p99 latency, error rate, throughput)
+- Config: `scripts/stress-test.config.json` (overridable via `STRESS_*` env vars)
