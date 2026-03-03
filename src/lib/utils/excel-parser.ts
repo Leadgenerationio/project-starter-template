@@ -12,6 +12,7 @@ export interface ParsedRow {
   postcode: string
   product: string
   source?: string
+  buyer?: string
 }
 
 export interface LeadVaultField {
@@ -27,7 +28,7 @@ export const LEADVAULT_FIELDS: LeadVaultField[] = [
   { key: 'phone', label: 'Phone', required: false },
   { key: 'postcode', label: 'Postcode', required: true },
   { key: 'product', label: 'Product', required: true },
-  { key: 'source', label: 'Source', required: false },
+  { key: 'buyer', label: 'Buyer', required: false },
 ]
 
 const HEADER_MAP: Record<string, string> = {
@@ -62,6 +63,12 @@ const HEADER_MAP: Record<string, string> = {
   'source': 'source',
   'lead source': 'source',
   'lead_source': 'source',
+  'buyer': 'buyer',
+  'buyer name': 'buyer',
+  'buyer_name': 'buyer',
+  'company': 'buyer',
+  'company name': 'buyer',
+  'company_name': 'buyer',
 }
 
 export interface ParsedHeaders {

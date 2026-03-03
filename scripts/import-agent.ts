@@ -25,6 +25,8 @@ const HEADER_MAP: Record<string, string> = {
   'postcode': 'postcode', 'post code': 'postcode', 'zip': 'postcode', 'zip code': 'postcode',
   'product': 'product', 'product type': 'product',
   'source': 'source', 'lead source': 'source',
+  'buyer': 'buyer', 'buyer name': 'buyer', 'buyer_name': 'buyer',
+  'company': 'buyer', 'company name': 'buyer', 'company_name': 'buyer',
 }
 
 const BATCH_SIZE = 50
@@ -76,32 +78,64 @@ async function processJob(jobId: string) {
   const totalRows = rawData.length
   await supabase.from('import_jobs').update({ total_rows: totalRows }).eq('id', jobId)
 
-  let successCount = 0
-  let errorCount = 0
-  const errors: { row: number; field: string; message: string }[] = []
-  const batch: Record<string, unknown>[] = []
-
-  for (let i = 0; i < rawData.length; i++) {
-    const row = rawData[i]
+  // Pre-map all rows to extract buyer names for auto-creation
+  const allMapped: Record<string, string>[] = rawData.map((row) => {
     const mapped: Record<string, string> = {}
-
     if (columnMapping) {
-      // Apply fixed values first, then column mappings
       Object.assign(mapped, fixedValues)
       for (const [key, value] of Object.entries(row)) {
         const targetField = reverseMap[key]
-        if (targetField) {
-          mapped[targetField] = String(value ?? '').trim()
-        }
+        if (targetField) mapped[targetField] = String(value ?? '').trim()
       }
     } else {
-      // Legacy: use hardcoded HEADER_MAP
       for (const [key, value] of Object.entries(row)) {
         const normalizedKey = key.toLowerCase().trim()
         const mappedKey = HEADER_MAP[normalizedKey] || normalizedKey
         mapped[mappedKey] = String(value ?? '').trim()
       }
     }
+    return mapped
+  })
+
+  // Auto-create buyers from mapped buyer column
+  const buyerIdMap = new Map<string, string>()
+  const buyerNames = new Set<string>()
+  for (const m of allMapped) {
+    if (m.buyer?.trim()) buyerNames.add(m.buyer.trim())
+  }
+  if (buyerNames.size > 0) {
+    const { data: existingBuyers } = await supabase
+      .from('buyers')
+      .select('id, company_name')
+      .eq('org_id', job.org_id)
+      .in('company_name', Array.from(buyerNames))
+    if (existingBuyers) {
+      for (const b of existingBuyers) buyerIdMap.set(b.company_name, b.id)
+    }
+    const missingNames = Array.from(buyerNames).filter((n) => !buyerIdMap.has(n))
+    if (missingNames.length > 0) {
+      const newBuyers = missingNames.map((name) => ({
+        org_id: job.org_id,
+        company_name: name,
+        contact_name: name,
+        email: `${name.toLowerCase().replace(/[^a-z0-9]/g, '')}@imported.local`,
+        is_active: true,
+      }))
+      const { data: created } = await supabase.from('buyers').insert(newBuyers).select('id, company_name')
+      if (created) {
+        for (const b of created) buyerIdMap.set(b.company_name, b.id)
+      }
+    }
+    console.log(`Buyers: ${buyerIdMap.size} total (${buyerNames.size - buyerIdMap.size} failed to create)`)
+  }
+
+  let successCount = 0
+  let errorCount = 0
+  const errors: { row: number; field: string; message: string }[] = []
+  const batch: Record<string, unknown>[] = []
+
+  for (let i = 0; i < allMapped.length; i++) {
+    const mapped = allMapped[i]
 
     // Validate
     let valid = true
@@ -114,6 +148,7 @@ async function processJob(jobId: string) {
     if (!valid) {
       errorCount++
     } else {
+      const buyerName = mapped.buyer?.trim()
       batch.push({
         org_id: job.org_id,
         first_name: mapped.first_name,
@@ -123,6 +158,7 @@ async function processJob(jobId: string) {
         postcode: mapped.postcode,
         product: mapped.product,
         source: SOURCES.includes(mapped.source) ? mapped.source : 'Website',
+        original_buyer_id: (buyerName && buyerIdMap.get(buyerName)) || null,
       })
     }
 

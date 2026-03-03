@@ -5,33 +5,30 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Select } from '@/components/ui/select'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@/components/ui/table'
-import { Loader2, ArrowRight, X, Plus } from 'lucide-react'
+import { Loader2, ArrowRight, X } from 'lucide-react'
 import { LEADVAULT_FIELDS, FIXED_VALUE_PREFIX } from '@/lib/utils/excel-parser'
-import { PRODUCTS, LEAD_SOURCES } from '@/lib/constants'
-import type { ColumnMapping, PreviewResponse, Buyer } from '@/lib/types'
+import { PRODUCTS } from '@/lib/constants'
+import type { ColumnMapping, PreviewResponse } from '@/lib/types'
 
 interface ColumnMappingStepProps {
   preview: PreviewResponse
-  buyers: Buyer[]
-  onConfirm: (mapping: ColumnMapping, buyerId: string | null) => void
+  onConfirm: (mapping: ColumnMapping) => void
   onCancel: () => void
   importing: boolean
 }
 
 const UNMAPPED = '__unmapped__'
-const FIXED = '__fixed_select__'
-const CREATE_NEW_BUYER = '__create_new__'
 
-/** Fields that have a known set of valid values */
-const FIELD_OPTIONS: Record<string, readonly string[]> = {
+/** Fields that have fixed value options shown directly in the dropdown */
+const FIELD_FIXED_OPTIONS: Record<string, readonly string[]> = {
   product: PRODUCTS,
-  source: LEAD_SOURCES,
 }
 
-export function ColumnMappingStep({ preview, buyers, onConfirm, onCancel, importing }: ColumnMappingStepProps) {
+/** Fields that only allow fixed value selection (no CSV column mapping) */
+const FIXED_ONLY_FIELDS = new Set(['product'])
+
+export function ColumnMappingStep({ preview, onConfirm, onCancel, importing }: ColumnMappingStepProps) {
   const [mapping, setMapping] = useState<ColumnMapping>(() => {
     const initial: ColumnMapping = {}
     for (const field of LEADVAULT_FIELDS) {
@@ -39,18 +36,6 @@ export function ColumnMappingStep({ preview, buyers, onConfirm, onCancel, import
     }
     return initial
   })
-
-  // Buyer selection state
-  const [buyerMode, setBuyerMode] = useState<'none' | 'existing' | 'create'>('none')
-  const [selectedBuyerId, setSelectedBuyerId] = useState<string>('')
-  const [newBuyerName, setNewBuyerName] = useState('')
-  const [newBuyerContact, setNewBuyerContact] = useState('')
-  const [newBuyerEmail, setNewBuyerEmail] = useState('')
-  const [creatingBuyer, setCreatingBuyer] = useState(false)
-  const [createdBuyer, setCreatedBuyer] = useState<Buyer | null>(null)
-
-  // Track which fields are in "fixed value" mode
-  const [fixedMode, setFixedMode] = useState<Record<string, boolean>>({})
 
   const usedHeaders = useMemo(() => {
     const used = new Set<string>()
@@ -79,70 +64,10 @@ export function ColumnMappingStep({ preview, buyers, onConfirm, onCancel, import
   const canConfirm = requiredMissing.length === 0 && duplicates.size === 0
 
   function handleFieldChange(fieldKey: string, selectValue: string) {
-    if (selectValue === FIXED) {
-      setFixedMode((prev) => ({ ...prev, [fieldKey]: true }))
-      setMapping((prev) => ({ ...prev, [fieldKey]: '' }))
-    } else if (selectValue === UNMAPPED) {
-      setFixedMode((prev) => ({ ...prev, [fieldKey]: false }))
-      setMapping((prev) => ({ ...prev, [fieldKey]: '' }))
-    } else {
-      setFixedMode((prev) => ({ ...prev, [fieldKey]: false }))
-      setMapping((prev) => ({ ...prev, [fieldKey]: selectValue }))
-    }
-  }
-
-  function handleFixedValueChange(fieldKey: string, value: string) {
     setMapping((prev) => ({
       ...prev,
-      [fieldKey]: value ? `${FIXED_VALUE_PREFIX}${value}` : '',
+      [fieldKey]: selectValue === UNMAPPED ? '' : selectValue,
     }))
-  }
-
-  function handleBuyerSelectChange(value: string) {
-    if (value === CREATE_NEW_BUYER) {
-      setBuyerMode('create')
-      setSelectedBuyerId('')
-    } else if (value === '') {
-      setBuyerMode('none')
-      setSelectedBuyerId('')
-    } else {
-      setBuyerMode('existing')
-      setSelectedBuyerId(value)
-    }
-  }
-
-  async function handleCreateBuyer() {
-    if (!newBuyerName.trim() || !newBuyerContact.trim() || !newBuyerEmail.trim()) return
-    setCreatingBuyer(true)
-    try {
-      const res = await fetch('/api/buyers', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          company_name: newBuyerName.trim(),
-          contact_name: newBuyerContact.trim(),
-          email: newBuyerEmail.trim(),
-          is_active: true,
-        }),
-      })
-      if (!res.ok) {
-        const err = await res.json()
-        throw new Error(err.error || 'Failed to create buyer')
-      }
-      const buyer = await res.json() as Buyer
-      setCreatedBuyer(buyer)
-      setSelectedBuyerId(buyer.id)
-      setBuyerMode('existing')
-    } catch {
-      // Stay in create mode on failure
-    } finally {
-      setCreatingBuyer(false)
-    }
-  }
-
-  function getEffectiveBuyerId(): string | null {
-    if (buyerMode === 'existing' && selectedBuyerId) return selectedBuyerId
-    return null
   }
 
   // Build preview rows mapped through current mapping
@@ -163,85 +88,8 @@ export function ColumnMappingStep({ preview, buyers, onConfirm, onCancel, import
     })
   }, [preview.sample_rows, mapping])
 
-  // Merge buyers list with any just-created buyer
-  const allBuyers = useMemo(() => {
-    if (createdBuyer && !buyers.find((b) => b.id === createdBuyer.id)) {
-      return [createdBuyer, ...buyers]
-    }
-    return buyers
-  }, [buyers, createdBuyer])
-
   return (
     <div className="space-y-6">
-      {/* Buyer assignment */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Assign Buyer (Optional)</CardTitle>
-          <CardDescription>
-            Assign these leads to a buyer, or create a new one.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <Select
-            value={buyerMode === 'create' ? CREATE_NEW_BUYER : selectedBuyerId}
-            onChange={(e) => handleBuyerSelectChange(e.target.value)}
-          >
-            <option value="">No buyer (assign later)</option>
-            <option value={CREATE_NEW_BUYER}>+ Create new buyer</option>
-            {allBuyers.map((buyer) => (
-              <option key={buyer.id} value={buyer.id}>
-                {buyer.company_name} ({buyer.contact_name})
-              </option>
-            ))}
-          </Select>
-
-          {buyerMode === 'create' && (
-            <div className="space-y-3 rounded-md border p-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="buyer-company">Company Name</Label>
-                <Input
-                  id="buyer-company"
-                  value={newBuyerName}
-                  onChange={(e) => setNewBuyerName(e.target.value)}
-                  placeholder="e.g. Acme Solar Ltd"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="buyer-contact">Contact Name</Label>
-                <Input
-                  id="buyer-contact"
-                  value={newBuyerContact}
-                  onChange={(e) => setNewBuyerContact(e.target.value)}
-                  placeholder="e.g. John Smith"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="buyer-email">Email</Label>
-                <Input
-                  id="buyer-email"
-                  type="email"
-                  value={newBuyerEmail}
-                  onChange={(e) => setNewBuyerEmail(e.target.value)}
-                  placeholder="e.g. john@acmesolar.com"
-                />
-              </div>
-              <Button
-                size="sm"
-                onClick={handleCreateBuyer}
-                disabled={creatingBuyer || !newBuyerName.trim() || !newBuyerContact.trim() || !newBuyerEmail.trim()}
-              >
-                {creatingBuyer ? (
-                  <><Loader2 className="h-3 w-3 mr-2 animate-spin" /> Creating...</>
-                ) : (
-                  <><Plus className="h-3 w-3 mr-2" /> Create Buyer</>
-                )}
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Column mapping */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
@@ -249,15 +97,16 @@ export function ColumnMappingStep({ preview, buyers, onConfirm, onCancel, import
             <Badge variant="secondary">{preview.total_rows} rows</Badge>
           </CardTitle>
           <CardDescription>
-            Map your file&apos;s columns to LeadVault fields, or set a fixed value for all rows.
+            Map your file&apos;s columns to LeadVault fields. Select a product for all rows.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {LEADVAULT_FIELDS.map((field) => {
             const currentValue = mapping[field.key]
-            const isFixed = fixedMode[field.key]
-            const isDuplicate = currentValue && !currentValue.startsWith(FIXED_VALUE_PREFIX) && duplicates.has(currentValue)
-            const options = FIELD_OPTIONS[field.key]
+            const isFixed = currentValue?.startsWith(FIXED_VALUE_PREFIX)
+            const isDuplicate = currentValue && !isFixed && duplicates.has(currentValue)
+            const fixedOptions = FIELD_FIXED_OPTIONS[field.key]
+            const isFixedOnly = FIXED_ONLY_FIELDS.has(field.key)
 
             return (
               <div key={field.key} className="flex items-center gap-3">
@@ -270,57 +119,41 @@ export function ColumnMappingStep({ preview, buyers, onConfirm, onCancel, import
                   )}
                 </div>
                 <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0" />
-                <div className="flex-1 flex gap-2">
-                  {isFixed ? (
-                    <>
-                      {options ? (
-                        <Select
-                          value={currentValue?.startsWith(FIXED_VALUE_PREFIX) ? currentValue.slice(FIXED_VALUE_PREFIX.length) : ''}
-                          onChange={(e) => handleFixedValueChange(field.key, e.target.value)}
-                          className="flex-1"
-                        >
-                          <option value="">-- Select value --</option>
-                          {options.map((opt) => (
-                            <option key={opt} value={opt}>{opt}</option>
-                          ))}
-                        </Select>
-                      ) : (
-                        <Input
-                          value={currentValue?.startsWith(FIXED_VALUE_PREFIX) ? currentValue.slice(FIXED_VALUE_PREFIX.length) : ''}
-                          onChange={(e) => handleFixedValueChange(field.key, e.target.value)}
-                          placeholder={`Enter ${field.label.toLowerCase()}...`}
-                          className="flex-1"
-                        />
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleFieldChange(field.key, UNMAPPED)}
-                        className="shrink-0 text-muted-foreground"
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
-                    </>
-                  ) : (
-                    <Select
-                      value={currentValue || UNMAPPED}
-                      onChange={(e) => handleFieldChange(field.key, e.target.value)}
-                      className={`flex-1 ${isDuplicate ? 'border-destructive' : ''}`}
-                    >
-                      <option value={UNMAPPED}>-- Select column --</option>
-                      <option value={FIXED}>Set fixed value for all rows</option>
-                      {preview.headers.map((header) => (
-                        <option
-                          key={header}
-                          value={header}
-                          disabled={usedHeaders.has(header) && mapping[field.key] !== header}
-                        >
-                          {header}
-                          {usedHeaders.has(header) && mapping[field.key] !== header ? ' (used)' : ''}
-                        </option>
-                      ))}
-                    </Select>
-                  )}
+                <div className="flex-1">
+                  <Select
+                    value={currentValue || UNMAPPED}
+                    onChange={(e) => handleFieldChange(field.key, e.target.value)}
+                    className={isDuplicate ? 'border-destructive' : ''}
+                  >
+                    <option value={UNMAPPED}>-- {isFixedOnly ? 'Select' : 'Select column'} --</option>
+
+                    {/* Fixed value options (e.g. product list) */}
+                    {fixedOptions && (
+                      <optgroup label={`${field.label} Options`}>
+                        {fixedOptions.map((opt) => (
+                          <option key={opt} value={`${FIXED_VALUE_PREFIX}${opt}`}>
+                            {opt}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+
+                    {/* CSV column options (hidden for fixed-only fields like product) */}
+                    {!isFixedOnly && (
+                      <optgroup label="CSV Columns">
+                        {preview.headers.map((header) => (
+                          <option
+                            key={header}
+                            value={header}
+                            disabled={usedHeaders.has(header) && mapping[field.key] !== header}
+                          >
+                            {header}
+                            {usedHeaders.has(header) && mapping[field.key] !== header ? ' (used)' : ''}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                  </Select>
                 </div>
               </div>
             )
@@ -339,7 +172,6 @@ export function ColumnMappingStep({ preview, buyers, onConfirm, onCancel, import
         </CardContent>
       </Card>
 
-      {/* Preview */}
       <Card>
         <CardHeader>
           <CardTitle>Preview (first {preview.sample_rows.length} rows)</CardTitle>
@@ -389,7 +221,7 @@ export function ColumnMappingStep({ preview, buyers, onConfirm, onCancel, import
       </Card>
 
       <div className="flex gap-3">
-        <Button onClick={() => onConfirm(mapping, getEffectiveBuyerId())} disabled={!canConfirm || importing}>
+        <Button onClick={() => onConfirm(mapping)} disabled={!canConfirm || importing}>
           {importing ? (
             <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Importing...</>
           ) : (

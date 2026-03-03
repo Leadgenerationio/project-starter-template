@@ -2,7 +2,6 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useImportJob } from '@/lib/hooks/use-import-job'
-import { useBuyers } from '@/lib/hooks/use-buyers'
 import { PageHeader } from '@/components/shared/page-header'
 import { useToast } from '@/components/ui/toast'
 import { FileUploadStep } from '@/components/import/file-upload-step'
@@ -20,7 +19,6 @@ export default function ImportPage() {
   const [jobId, setJobId] = useState<string | null>(null)
 
   const { data: job } = useImportJob(jobId)
-  const { data: buyers = [] } = useBuyers()
   const previewRef = useRef(preview)
   previewRef.current = preview
 
@@ -78,7 +76,7 @@ export default function ImportPage() {
     }
   }
 
-  async function handleMappingConfirm(mapping: ColumnMapping, buyerId: string | null) {
+  async function handleMappingConfirm(mapping: ColumnMapping) {
     if (!preview) return
 
     abortRef.current?.abort()
@@ -95,7 +93,6 @@ export default function ImportPage() {
           storage_path: preview.storage_path,
           filename: preview.filename,
           column_mapping: mapping,
-          buyer_id: buyerId,
         }),
         signal: controller.signal,
       })
@@ -156,7 +153,6 @@ export default function ImportPage() {
         {(step === 'mapping' || step === 'importing') && preview && !jobId && (
           <ColumnMappingStep
             preview={preview}
-            buyers={buyers}
             onConfirm={handleMappingConfirm}
             onCancel={handleMappingCancel}
             importing={step === 'importing'}

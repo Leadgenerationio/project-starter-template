@@ -43,7 +43,7 @@ async function handleMappedImport(
     return NextResponse.json({ error: issue.message }, { status: 400 })
   }
 
-  const { storage_path, filename, column_mapping, buyer_id } = parsed.data
+  const { storage_path, filename, column_mapping } = parsed.data
 
   // Download file from storage
   const { data: fileData, error: downloadError } = await supabase.storage
@@ -66,7 +66,7 @@ async function handleMappedImport(
   // Small files: process inline
   if (rows.length <= INLINE_IMPORT_THRESHOLD) {
     try {
-      return await processInline(supabase, orgId, userId, filename, rows, column_mapping, buyer_id ?? undefined)
+      return await processInline(supabase, orgId, userId, filename, rows, column_mapping)
     } finally {
       // Always clean up storage file after inline processing, even on failure
       await supabase.storage.from('imports').remove([storage_path])
@@ -180,9 +180,52 @@ async function processInline(
   filename: string,
   rows: ParsedRow[],
   columnMapping?: ColumnMapping,
-  buyerId?: string
 ) {
   const errors: ImportError[] = []
+
+  // Collect unique buyer names from the raw rows (before Zod strips extra fields)
+  const buyerNames = new Set<string>()
+  for (const row of rows) {
+    if (row.buyer?.trim()) buyerNames.add(row.buyer.trim())
+  }
+
+  // Build buyer name → id map by looking up existing + auto-creating missing
+  const buyerIdMap = new Map<string, string>()
+  if (buyerNames.size > 0) {
+    const { data: existingBuyers } = await supabase
+      .from('buyers')
+      .select('id, company_name')
+      .eq('org_id', orgId)
+      .in('company_name', Array.from(buyerNames))
+
+    if (existingBuyers) {
+      for (const b of existingBuyers) {
+        buyerIdMap.set(b.company_name, b.id)
+      }
+    }
+
+    // Auto-create any missing buyers
+    const missingNames = Array.from(buyerNames).filter((n) => !buyerIdMap.has(n))
+    if (missingNames.length > 0) {
+      const newBuyers = missingNames.map((name) => ({
+        org_id: orgId,
+        company_name: name,
+        contact_name: name,
+        email: `${name.toLowerCase().replace(/[^a-z0-9]/g, '')}@imported.local`,
+        is_active: true,
+      }))
+      const { data: created } = await supabase
+        .from('buyers')
+        .insert(newBuyers)
+        .select('id, company_name')
+      if (created) {
+        for (const b of created) {
+          buyerIdMap.set(b.company_name, b.id)
+        }
+      }
+    }
+  }
+
   const validLeads: Record<string, unknown>[] = []
 
   for (let i = 0; i < rows.length; i++) {
@@ -191,6 +234,7 @@ async function processInline(
       const issue = result.error.issues[0]
       errors.push({ row: i + 2, field: String(issue.path[0] ?? ''), message: issue.message })
     } else {
+      const buyerName = rows[i].buyer?.trim()
       validLeads.push({
         org_id: orgId,
         first_name: result.data.first_name,
@@ -201,7 +245,7 @@ async function processInline(
         product: result.data.product,
         source: result.data.source ?? 'Website',
         status: 'new',
-        original_buyer_id: buyerId ?? null,
+        original_buyer_id: (buyerName && buyerIdMap.get(buyerName)) ?? null,
       })
     }
   }
