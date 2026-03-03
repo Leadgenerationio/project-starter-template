@@ -16,6 +16,7 @@ After any new feature or major change, always update `ARCHITECTURE.md`, `CLAUDE.
 - **Multi-tenancy**: All tables have `org_id`. RLS policies enforce tenant isolation.
 - **Lead lifecycle**: new (0-14d) → aging (15-29d) → eligible (30+d) → resold
 - **Buyer exclusion**: Leads can't be sold to original buyer or any prior purchaser
+- **Import flow**: Upload → Preview (header parsing + fuzzy mapping) → Column mapping UI → Import with user mapping
 - **Order flow**: Configure → Draft → Confirm (creates lead_sales atomically) → Download CSV
 - **Zod v4**: Use `.issues[0].message` not `.errors[0].message`. Don't use `.default()` in schemas passed to react-hook-form zodResolver.
 
@@ -28,7 +29,7 @@ src/
 │   └── api/                          # 20+ API routes
 ├── lib/
 │   ├── supabase/                     # client, server, admin, middleware, auth-helpers
-│   ├── validations/                  # Zod schemas (lead, buyer, order, auth, import)
+│   ├── validations/                  # Zod schemas (lead, buyer, order, auth, import, column-mapping)
 │   ├── utils/                        # cn, format, lead-status, csv-export, excel-parser
 │   ├── hooks/                        # use-leads, use-buyers, use-orders, use-import-job
 │   ├── constants.ts                  # Products, sources, statuses, thresholds
@@ -37,12 +38,13 @@ src/
 │   ├── ui/                           # Primitives (button, input, card, table, dialog, toast...)
 │   ├── layout/                       # sidebar, topbar, mobile-nav
 │   ├── shared/                       # data-table, pagination, page-header, empty-state, skeleton
+│   ├── import/                       # file-upload-step, column-mapping-step, import-progress-step
 │   └── {leads,buyers,orders,dashboard,notifications}/  # Feature components
 ├── providers/                        # auth-provider, org-provider, query-provider
 └── middleware.ts                     # Auth guard + session refresh
 
 scripts/                              # Testing agents + background agents
-supabase/migrations/                  # 12 migration files
+supabase/migrations/                  # 16 migration files
 ```
 
 ## When making changes:

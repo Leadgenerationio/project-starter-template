@@ -60,6 +60,15 @@ async function processJob(jobId: string) {
   const sheet = workbook.Sheets[workbook.SheetNames[0]]
   const rawData = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet)
 
+  // Build reverse mapping from column_mapping if present (csvHeader → fieldKey)
+  const columnMapping: Record<string, string> | null = job.column_mapping
+  const reverseMap: Record<string, string> = {}
+  if (columnMapping) {
+    for (const [fieldKey, csvHeader] of Object.entries(columnMapping)) {
+      if (csvHeader) reverseMap[csvHeader] = fieldKey
+    }
+  }
+
   const totalRows = rawData.length
   await supabase.from('import_jobs').update({ total_rows: totalRows }).eq('id', jobId)
 
@@ -72,10 +81,21 @@ async function processJob(jobId: string) {
     const row = rawData[i]
     const mapped: Record<string, string> = {}
 
-    for (const [key, value] of Object.entries(row)) {
-      const normalizedKey = key.toLowerCase().trim()
-      const mappedKey = HEADER_MAP[normalizedKey] || normalizedKey
-      mapped[mappedKey] = String(value ?? '').trim()
+    if (columnMapping) {
+      // Use user-defined column mapping
+      for (const [key, value] of Object.entries(row)) {
+        const targetField = reverseMap[key]
+        if (targetField) {
+          mapped[targetField] = String(value ?? '').trim()
+        }
+      }
+    } else {
+      // Legacy: use hardcoded HEADER_MAP
+      for (const [key, value] of Object.entries(row)) {
+        const normalizedKey = key.toLowerCase().trim()
+        const mappedKey = HEADER_MAP[normalizedKey] || normalizedKey
+        mapped[mappedKey] = String(value ?? '').trim()
+      }
     }
 
     // Validate
@@ -134,6 +154,9 @@ async function processJob(jobId: string) {
     error_count: errorCount,
     errors: errors.slice(0, 100),
   }).eq('id', jobId)
+
+  // Clean up storage file after processing
+  await supabase.storage.from('imports').remove([job.storage_path])
 
   // Create notification
   await supabase.from('notifications').insert({

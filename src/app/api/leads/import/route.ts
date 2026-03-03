@@ -3,10 +3,12 @@ export const maxDuration = 60 // Allow up to 60s for large inline imports
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthenticatedOrg } from '@/lib/supabase/auth-helpers'
 import { createClient } from '@/lib/supabase/server'
-import { MAX_IMPORT_FILE_SIZE, INLINE_IMPORT_THRESHOLD, IMPORT_BATCH_SIZE } from '@/lib/constants'
-import { parseExcelBuffer } from '@/lib/utils/excel-parser'
+import { INLINE_IMPORT_THRESHOLD, IMPORT_BATCH_SIZE, MAX_IMPORT_FILE_SIZE } from '@/lib/constants'
+import { parseExcelBuffer, applyColumnMapping } from '@/lib/utils/excel-parser'
 import { importRowSchema } from '@/lib/validations/import'
-import type { ImportError } from '@/lib/types'
+import { columnMappingImportSchema } from '@/lib/validations/column-mapping'
+import type { ImportError, ColumnMapping } from '@/lib/types'
+import type { ParsedRow } from '@/lib/utils/excel-parser'
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>
 
@@ -16,6 +18,99 @@ export async function POST(request: NextRequest) {
 
   const { supabase, orgId, user } = auth
 
+  const contentType = request.headers.get('content-type') || ''
+
+  // JSON path: file already uploaded via preview, column mapping provided
+  if (contentType.includes('application/json')) {
+    return handleMappedImport(request, supabase, orgId, user.id)
+  }
+
+  // FormData path: legacy direct upload (backwards compatible)
+  return handleFormDataImport(request, supabase, orgId, user.id)
+}
+
+async function handleMappedImport(
+  request: NextRequest,
+  supabase: SupabaseClient,
+  orgId: string,
+  userId: string
+) {
+  const body = await request.json()
+  const parsed = columnMappingImportSchema.safeParse(body)
+
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0]
+    return NextResponse.json({ error: issue.message }, { status: 400 })
+  }
+
+  const { storage_path, filename, column_mapping } = parsed.data
+
+  // Download file from storage
+  const { data: fileData, error: downloadError } = await supabase.storage
+    .from('imports')
+    .download(storage_path)
+
+  if (downloadError || !fileData) {
+    return NextResponse.json({ error: 'Failed to download file from storage' }, { status: 500 })
+  }
+
+  const buffer = await fileData.arrayBuffer()
+
+  let rows: ParsedRow[]
+  try {
+    rows = applyColumnMapping(buffer, column_mapping)
+  } catch {
+    return NextResponse.json({ error: 'Failed to parse file with mapping' }, { status: 400 })
+  }
+
+  // Small files: process inline
+  if (rows.length <= INLINE_IMPORT_THRESHOLD) {
+    try {
+      return await processInline(supabase, orgId, userId, filename, rows, column_mapping)
+    } finally {
+      // Always clean up storage file after inline processing, even on failure
+      await supabase.storage.from('imports').remove([storage_path])
+    }
+  }
+
+  // Large files: create a pending job for the background agent
+  const largeJobRecord: Record<string, unknown> = {
+    org_id: orgId,
+    user_id: userId,
+    filename,
+    storage_path,
+    status: 'pending',
+    total_rows: rows.length,
+    column_mapping,
+  }
+
+  let { data: job, error: jobError } = await supabase
+    .from('import_jobs')
+    .insert(largeJobRecord)
+    .select()
+    .single()
+
+  // Retry without column_mapping if column doesn't exist yet
+  if (jobError?.message?.includes('column_mapping')) {
+    delete largeJobRecord.column_mapping
+    const retry = await supabase.from('import_jobs').insert(largeJobRecord).select().single()
+    job = retry.data
+    jobError = retry.error
+  }
+
+  if (jobError) {
+    return NextResponse.json({ error: 'Failed to create import job' }, { status: 500 })
+  }
+
+  return NextResponse.json(job, { status: 201 })
+}
+
+async function handleFormDataImport(
+  request: NextRequest,
+  supabase: SupabaseClient,
+  orgId: string,
+  userId: string
+) {
   const formData = await request.formData()
   const file = formData.get('file') as File
 
@@ -34,7 +129,6 @@ export async function POST(request: NextRequest) {
 
   const buffer = await file.arrayBuffer()
 
-  // Parse to check row count for inline processing
   let rows
   try {
     rows = parseExcelBuffer(buffer)
@@ -44,7 +138,7 @@ export async function POST(request: NextRequest) {
 
   // Small files: process inline without background agent
   if (rows.length <= INLINE_IMPORT_THRESHOLD) {
-    return processInline(supabase, orgId, user.id, file.name, rows)
+    return processInline(supabase, orgId, userId, file.name, rows)
   }
 
   // Large files: upload to storage and create a pending job for the background agent
@@ -62,7 +156,7 @@ export async function POST(request: NextRequest) {
     .from('import_jobs')
     .insert({
       org_id: orgId,
-      user_id: user.id,
+      user_id: userId,
       filename: file.name,
       storage_path: storagePath,
       status: 'pending',
@@ -84,7 +178,8 @@ async function processInline(
   orgId: string,
   userId: string,
   filename: string,
-  rows: ReturnType<typeof parseExcelBuffer>
+  rows: ParsedRow[],
+  columnMapping?: ColumnMapping
 ) {
   const errors: ImportError[] = []
   const validLeads: Record<string, unknown>[] = []
@@ -127,22 +222,33 @@ async function processInline(
   }
 
   // Create a completed job record so the UI can show results
-  const { data: job, error: jobError } = await supabase
+  const jobRecord: Record<string, unknown> = {
+    org_id: orgId,
+    user_id: userId,
+    filename,
+    storage_path: 'inline',
+    status: 'completed',
+    total_rows: rows.length,
+    processed_rows: rows.length,
+    success_count: validLeads.length,
+    error_count: errors.length,
+    errors: errors.length > 0 ? errors : null,
+  }
+  if (columnMapping) jobRecord.column_mapping = columnMapping
+
+  let { data: job, error: jobError } = await supabase
     .from('import_jobs')
-    .insert({
-      org_id: orgId,
-      user_id: userId,
-      filename,
-      storage_path: 'inline',
-      status: 'completed',
-      total_rows: rows.length,
-      processed_rows: rows.length,
-      success_count: validLeads.length,
-      error_count: errors.length,
-      errors: errors.length > 0 ? errors : null,
-    })
+    .insert(jobRecord)
     .select()
     .single()
+
+  // Retry without column_mapping if column doesn't exist yet (migration not applied)
+  if (jobError?.message?.includes('column_mapping')) {
+    delete jobRecord.column_mapping
+    const retry = await supabase.from('import_jobs').insert(jobRecord).select().single()
+    job = retry.data
+    jobError = retry.error
+  }
 
   if (jobError) {
     return NextResponse.json({ error: 'Leads imported but failed to create job record' }, { status: 500 })

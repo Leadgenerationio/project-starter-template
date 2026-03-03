@@ -31,7 +31,7 @@ src/
 │   │   ├── leads/
 │   │   │   ├── page.tsx              # Data table + filters + pagination
 │   │   │   ├── new/page.tsx          # Manual lead entry form
-│   │   │   ├── import/page.tsx       # Excel upload + progress
+│   │   │   ├── import/page.tsx       # Excel upload + column mapping + progress
 │   │   │   └── [id]/page.tsx         # Lead detail + aging bar + sale history
 │   │   ├── buyers/
 │   │   │   ├── page.tsx              # Buyer table + 3 metric cards
@@ -51,7 +51,8 @@ src/
 │       ├── leads/route.ts            # GET (list+filter), POST (create)
 │       ├── leads/[id]/route.ts       # GET, PATCH, DELETE
 │       ├── leads/count/route.ts      # GET (eligible count for orders)
-│       ├── leads/import/route.ts     # POST (file upload)
+│       ├── leads/import/route.ts     # POST (file upload or JSON with column mapping)
+│       ├── leads/import/preview/route.ts  # POST (parse headers + suggest mapping), DELETE (cleanup)
 │       ├── leads/import/[jobId]/route.ts  # GET (job status)
 │       ├── buyers/route.ts           # GET (with stats), POST
 │       ├── buyers/[id]/route.ts      # GET (with history), PATCH, DELETE
@@ -67,7 +68,7 @@ src/
 │       └── org/invites/route.ts      # GET, POST, DELETE
 ├── lib/
 │   ├── supabase/{client,server,admin,middleware,auth-helpers}.ts
-│   ├── validations/{lead,buyer,order,auth,import}.ts
+│   ├── validations/{lead,buyer,order,auth,import,column-mapping}.ts
 │   ├── utils/{cn,format,lead-status,csv-export,excel-parser}.ts
 │   ├── hooks/{use-leads,use-buyers,use-orders,use-import-job}.ts
 │   ├── constants.ts
@@ -78,6 +79,7 @@ src/
 │   ├── dashboard/metric-card.tsx
 │   ├── leads/{leads-table,lead-form,lead-aging-bar,lead-status-badge,lead-filters}.tsx
 │   ├── buyers/{buyers-table,buyer-form}.tsx
+│   ├── import/{file-upload-step,column-mapping-step,import-progress-step}.tsx
 │   ├── notifications/notification-bell.tsx
 │   └── shared/{data-table,data-table-pagination,page-header,empty-state,loading-skeleton,confirm-dialog,error-boundary}.tsx
 ├── providers/{auth-provider,org-provider,query-provider}.tsx
@@ -91,7 +93,7 @@ scripts/
 └── import-agent.ts + config           # Background Excel processing
 
 supabase/
-├── migrations/00001-00012.sql         # Schema + RLS + functions + storage
+├── migrations/00001-00016.sql         # Schema + RLS + functions + storage + column_mapping
 └── seed.sql                           # Demo data template
 ```
 
@@ -111,7 +113,9 @@ Configure → Create Draft → Review → Confirm (creates lead_sales, updates s
 
 ### Import Flow
 ```
-Upload file → Store in Supabase Storage → Create import_job → Import agent processes rows → Notify user
+Upload file → Preview (parse headers + suggest mapping) → User maps columns → Import with mapping
+  ├── Small files (≤5000 rows): processed inline with column mapping
+  └── Large files: stored in Supabase Storage → import_job (with column_mapping) → Import agent → Notify user
 ```
 
 ## Database (8 tables + RLS)
@@ -125,7 +129,7 @@ Upload file → Store in Supabase Storage → Create import_job → Import agent
 | `leads` | Core lead data with status lifecycle |
 | `orders` | Resale order groups (draft/confirmed/downloaded) |
 | `lead_sales` | Individual sale records (original/resale) |
-| `import_jobs` | Excel upload tracking with progress |
+| `import_jobs` | Excel upload tracking with progress + column_mapping |
 | `notifications` | In-app alerts |
 
 All tables have `org_id` for multi-tenancy with Row Level Security.

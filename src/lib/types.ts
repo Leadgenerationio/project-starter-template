@@ -101,8 +101,21 @@ export interface ImportJob {
   success_count: number
   error_count: number
   errors: ImportError[] | null
+  column_mapping: ColumnMapping | null
   created_at: string
   updated_at: string
+}
+
+/** Maps LeadVault field key → CSV column header chosen by user */
+export type ColumnMapping = Record<string, string>
+
+export interface PreviewResponse {
+  storage_path: string
+  filename: string
+  headers: string[]
+  sample_rows: Record<string, string>[]
+  suggested_mapping: ColumnMapping
+  total_rows: number
 }
 
 export interface ImportError {
