@@ -1,0 +1,5 @@
+{
+  "intervalMs": 3600000,
+  "importFileMaxAgeHours": 24,
+  "verbose": false
+}

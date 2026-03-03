@@ -39,6 +39,40 @@ After writing any feature or making any change, **always** do a self-review pass
 
 10. **AbortController on long fetches.** Any client-side fetch that can run longer than 10 seconds should use an AbortController that aborts on component unmount and offers a cancel button to the user.
 
+## Mandatory: Build Process Rules (Learned the Hard Way)
+
+These rules exist because we got burned. Follow them on every project.
+
+### 1. Depth-first, not breadth-first
+Build one complete vertical slice (DB → API → UI → test in browser) before starting the next feature. A working app with 3 tested features beats a compiling app with 9 untested ones. Never build all schemas, then all APIs, then all UI in horizontal layers.
+
+### 2. Connect real services first
+Set up the database/auth/storage in the first 30 minutes. Run migrations and verify each route against a real database before moving on. Deferring integration to "later" hides bugs in every layer — wrong column names, broken RLS policies, bad queries.
+
+### 3. Study the reference before building
+If given a reference app or design, fetch and study it before writing code. Build to match the actual UI patterns, not just the spec. Specs miss details that the reference makes obvious.
+
+### 4. Use real libraries, don't hand-roll primitives
+Use `shadcn/ui init` + `shadcn add` for UI components. Hand-rolled dialogs, dropdowns, and toasts miss accessibility (keyboard nav, focus trapping, aria attributes, Escape key). It's slower and worse.
+
+### 5. Every created component/route must be used
+If you create an error boundary component, wire it into a layout. If you write an API route (`/api/auth/accept-invite`), make sure it exists. Grep for dead code and dangling references before declaring done.
+
+### 6. No N+1 query patterns
+Never loop through records firing individual queries. Use SQL joins, views, or batch operations. Especially in list endpoints — if `GET /api/buyers` fires 2 queries per buyer, it breaks at 50 buyers.
+
+### 7. Batch database mutations
+Order confirmation, bulk imports, and similar operations should use transactions or batch updates — not sequential per-row updates in a for-loop. One SQL statement beats N round trips.
+
+### 8. Debounce search inputs
+Any text input that triggers API calls must be debounced (300ms minimum). Firing a query on every keystroke hammers the backend and creates race conditions.
+
+### 9. Background processing needs a fallback
+If a feature depends on a separate agent process running (e.g., import-agent), either process small jobs inline as a fallback, or clearly tell the user the agent must be running. Don't let jobs sit in "pending" forever silently.
+
+### 10. Seed data must actually work
+Commented-out SQL with placeholder UUIDs is not seed data. Provide a script that creates a test user and populates real demo data, or use Supabase's seed mechanism properly.
+
 ## Mandatory: Proactive Improvements
 
 When implementing a feature, don't stop at the minimum. Always also implement these patterns where applicable:
@@ -63,17 +97,25 @@ When implementing a feature, don't stop at the minimum. Always also implement th
 
 ## Architecture Notes
 
-<!-- TODO: Fill in your project-specific architecture below -->
+- **Framework**: Next.js 16 (App Router, TypeScript)
+- **Database**: Supabase (PostgreSQL + Auth + Storage + RLS)
+- **Authentication**: Supabase Auth with email/password, middleware guards
+- **State management**: TanStack React Query + React Context (auth, org providers)
+- **Deployment**: Vercel
+- **Key dirs**: `src/app/` (pages + API routes), `src/lib/` (supabase, validations, hooks, utils), `src/components/` (ui, layout, features), `supabase/migrations/` (schema)
 
-- **Framework**:
-- **Database**:
-- **Authentication**:
-- **State management**:
-- **Deployment**:
-- **Key dirs**:
+### Key patterns
+- All API routes use `getAuthenticatedOrg()` from `src/lib/supabase/auth-helpers.ts`
+- Multi-tenancy via `org_id` on all tables + Supabase RLS policies
+- Zod v4 for validation — use `.issues[0].message` not `.errors[0].message`
+- React Hook Form + zodResolver — avoid `.default()` in Zod schemas used with forms (causes type mismatch)
+- Lead lifecycle: new (0-14d) → aging (15-29d) → eligible (30+d) → resold
+- Order confirmation atomically creates lead_sales and updates lead status/revenue
 
 ## Agents
 
 - **Watchdog QA**: `npm run watchdog` — continuous health/endpoint testing + auto-remediation. Config in `scripts/watchdog.config.json`.
 - **Security Agent**: `npm run security` — continuous security audit (14 categories). `npm run security:once` for single scan with CI-friendly exit codes. Config in `scripts/security.config.json`.
 - **Stress Test Agent**: `npm run stress-test` — simulates N concurrent users. Reports per-endpoint metrics (p50/p95/p99 latency, error rate, throughput). Config in `scripts/stress-test.config.json`.
+- **Lead Aging Agent**: `npm run lead-aging` — hourly status transitions + import file cleanup. Config in `scripts/lead-aging-agent.config.json`.
+- **Import Agent**: `npm run import-agent` — polls for pending import jobs, processes Excel rows in batches. Config in `scripts/import-agent.config.json`.

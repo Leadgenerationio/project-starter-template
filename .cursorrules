@@ -1,26 +1,48 @@
-You are building a web application. Follow all rules in CLAUDE.md.
+You are building LeadVault — a multi-tenant lead management and resale platform. Follow all rules in CLAUDE.md.
 
 ## IMPORTANT: Keep Docs In Sync
 After any new feature or major change, always update `ARCHITECTURE.md`, `CLAUDE.md`, and `.cursorrules` to reflect the current state. Don't ask — just do it.
 
 ## Architecture
 
-<!-- TODO: Fill in your project-specific architecture -->
-
-- **Framework**:
-- **Database**:
-- **Authentication**:
-- **State management**:
-- **Deployment**:
+- **Framework**: Next.js 16 (App Router, TypeScript)
+- **Database**: Supabase (PostgreSQL + Auth + Storage + RLS)
+- **Authentication**: Supabase Auth, middleware guards, `getAuthenticatedOrg()` helper
+- **State management**: TanStack React Query + React Context (auth-provider, org-provider)
+- **Deployment**: Vercel
 
 ## Key Concepts
 
-<!-- TODO: Fill in project-specific concepts -->
+- **Multi-tenancy**: All tables have `org_id`. RLS policies enforce tenant isolation.
+- **Lead lifecycle**: new (0-14d) → aging (15-29d) → eligible (30+d) → resold
+- **Buyer exclusion**: Leads can't be sold to original buyer or any prior purchaser
+- **Order flow**: Configure → Draft → Confirm (creates lead_sales atomically) → Download CSV
+- **Zod v4**: Use `.issues[0].message` not `.errors[0].message`. Don't use `.default()` in schemas passed to react-hook-form zodResolver.
 
 ## File Structure
 ```
 src/
-  <!-- TODO: Fill in your file structure -->
+├── app/                              # Pages + API routes (App Router)
+│   ├── (auth)/                       # Login, register, forgot-password, invite
+│   ├── (dashboard)/                  # Dashboard, leads, buyers, orders, settings
+│   └── api/                          # 20+ API routes
+├── lib/
+│   ├── supabase/                     # client, server, admin, middleware, auth-helpers
+│   ├── validations/                  # Zod schemas (lead, buyer, order, auth, import)
+│   ├── utils/                        # cn, format, lead-status, csv-export, excel-parser
+│   ├── hooks/                        # use-leads, use-buyers, use-orders, use-import-job
+│   ├── constants.ts                  # Products, sources, statuses, thresholds
+│   └── types.ts                      # TypeScript interfaces
+├── components/
+│   ├── ui/                           # Primitives (button, input, card, table, dialog, toast...)
+│   ├── layout/                       # sidebar, topbar, mobile-nav
+│   ├── shared/                       # data-table, pagination, page-header, empty-state, skeleton
+│   └── {leads,buyers,orders,dashboard,notifications}/  # Feature components
+├── providers/                        # auth-provider, org-provider, query-provider
+└── middleware.ts                     # Auth guard + session refresh
+
+scripts/                              # Testing agents + background agents
+supabase/migrations/                  # 12 migration files
 ```
 
 ## When making changes:
@@ -28,20 +50,13 @@ src/
 2. Handle partial failures — never throw away successful work because one item failed
 3. Show real progress during long operations (X of Y, not just a spinner)
 4. Remove dead code — grep for unused types/interfaces/exports before finishing
+5. All API routes must use `getAuthenticatedOrg()` from `src/lib/supabase/auth-helpers.ts`
+6. Toast auto-dismisses after 5 seconds (built into toast component)
 
-## Watchdog QA Agent
-- `npm run watchdog` — standalone script that continuously tests all endpoints
-- Config: `scripts/watchdog.config.json` (all overridable via `WATCHDOG_*` env vars)
-- Requires `WATCHDOG_EMAIL` / `WATCHDOG_PASSWORD` env vars for authenticated API tests
-- Reports to `watchdog-report.json` (gitignored)
+## Agents
 
-## Security Agent
-- `npm run security` — continuous security audit across 14 categories
-- `npm run security:once` — single scan with exit codes (0=clean, 1=high, 2=critical) for CI
-- Config: `scripts/security.config.json`
-- Reports to `security-report.json` (gitignored)
-
-## Stress Test Agent
-- `npm run stress-test` — simulates N concurrent users performing realistic flows
-- Reports per-endpoint metrics (requests, success%, p50/p95/p99 latency, error rate, throughput)
-- Config: `scripts/stress-test.config.json` (overridable via `STRESS_*` env vars)
+- **Watchdog QA**: `npm run watchdog` — endpoint testing. Config: `scripts/watchdog.config.json`
+- **Security Agent**: `npm run security` / `npm run security:once`. Config: `scripts/security.config.json`
+- **Stress Test Agent**: `npm run stress-test`. Config: `scripts/stress-test.config.json`
+- **Lead Aging Agent**: `npm run lead-aging` — hourly status updates + import cleanup
+- **Import Agent**: `npm run import-agent` — background Excel processing

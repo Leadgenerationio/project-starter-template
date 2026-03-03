@@ -13,11 +13,21 @@ Key areas: validation, progress feedback, user control, robustness, performance,
 - Wants self-review pass after every feature before declaring done
 - After any feature/major change: ALWAYS update ARCHITECTURE.md, CLAUDE.md, .cursorrules, and memory files
 
-## Project Structure
-<!-- TODO: Fill in as you build -->
+## Project: LeadVault
+- Multi-tenant lead management and resale platform
+- Next.js 16 + Supabase + Tailwind v4 + TanStack React Query/Table
+
+## Key Technical Decisions
+- **Zod v4**: Use `.issues[0].message` not `.errors[0].message`
+- **Zod + react-hook-form**: Don't use `.default()` in schemas — causes type mismatch with zodResolver
+- **Next.js 16**: Route handlers use `params: Promise<{}>` pattern
+- **Tailwind v4**: Uses `@import "tailwindcss"`, `@theme {}`, and `@tailwindcss/postcss`
+- **Multi-tenancy**: All tables have `org_id` + RLS. Use `getAuthenticatedOrg()` for API routes.
 
 ## Key Files
-<!-- TODO: Document key files as you build -->
-
-## Known Architecture Decisions
-<!-- TODO: Document decisions as you make them -->
+- Auth helper: `src/lib/supabase/auth-helpers.ts`
+- Constants/types: `src/lib/constants.ts`, `src/lib/types.ts`
+- Validations: `src/lib/validations/{lead,buyer,order,auth,import}.ts`
+- Hooks: `src/lib/hooks/{use-leads,use-buyers,use-orders,use-import-job}.ts`
+- DB migrations: `supabase/migrations/00001-00012.sql`
+- Agents: `scripts/{lead-aging-agent,import-agent,watchdog,security,stress-test}.ts`
