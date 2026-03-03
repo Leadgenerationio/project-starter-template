@@ -19,6 +19,8 @@ export interface LeadVaultField {
   key: string
   label: string
   required: boolean
+  /** Field is auto-detected from unmapped columns, not mapped via dropdown */
+  autoDetect?: boolean
 }
 
 export const LEADVAULT_FIELDS: LeadVaultField[] = [
@@ -28,7 +30,7 @@ export const LEADVAULT_FIELDS: LeadVaultField[] = [
   { key: 'phone', label: 'Phone', required: false },
   { key: 'postcode', label: 'Postcode', required: true },
   { key: 'product', label: 'Product', required: true },
-  { key: 'buyer', label: 'Buyer', required: false },
+  { key: 'buyer', label: 'Buyer', required: false, autoDetect: true },
 ]
 
 const HEADER_MAP: Record<string, string> = {
@@ -101,6 +103,7 @@ export function suggestMapping(csvHeaders: string[]): ColumnMapping {
   const mapping: ColumnMapping = {}
 
   for (const field of LEADVAULT_FIELDS) {
+    if (field.autoDetect) continue // auto-detected fields are not mapped via dropdown
     // Try exact and fuzzy matches from HEADER_MAP
     for (const header of csvHeaders) {
       const normalized = header.toLowerCase().trim()
@@ -128,7 +131,7 @@ export function suggestMapping(csvHeaders: string[]): ColumnMapping {
 }
 
 /** Status markers in buyer columns — cell says "Sold" but the buyer is the column header */
-const BUYER_STATUS_MARKERS = new Set(['sold', 'yes', 'y', '1', 'true', 'x'])
+export const BUYER_STATUS_MARKERS = new Set(['sold', 'yes', 'y', '1', 'true', 'x'])
 
 /** Parse file applying user-chosen column mapping instead of HEADER_MAP */
 export function applyColumnMapping(buffer: ArrayBuffer, mapping: ColumnMapping): ParsedRow[] {
@@ -148,26 +151,25 @@ export function applyColumnMapping(buffer: ArrayBuffer, mapping: ColumnMapping):
     }
   }
 
-  // Find the column header mapped to the buyer field (if any, and not a fixed value)
-  const buyerColumn = Object.entries(reverseMap).find(([, field]) => field === 'buyer')?.[0]
-
   return rawData.map((row) => {
     const mapped: Record<string, string> = { ...fixedValues }
     for (const [key, value] of Object.entries(row)) {
       const targetField = reverseMap[key]
       if (targetField) {
-        const cellValue = String(value ?? '').trim()
-        // Buyer column: if cell is a status marker like "Sold", the column header IS the buyer name
-        if (targetField === 'buyer' && cellValue && BUYER_STATUS_MARKERS.has(cellValue.toLowerCase())) {
-          mapped[targetField] = key
-        } else {
-          mapped[targetField] = cellValue
-        }
+        mapped[targetField] = String(value ?? '').trim()
       }
     }
-    // If buyer is mapped to a column but cell was empty (XLSX omits empty cells), use column header
-    if (buyerColumn && !mapped.buyer) {
-      mapped.buyer = buyerColumn
+    // Auto-detect buyer: scan unmapped columns for status markers like "Sold"
+    // The column header IS the buyer name (supports multiple buyer columns)
+    if (!mapped.buyer) {
+      for (const [key, value] of Object.entries(row)) {
+        if (reverseMap[key]) continue // skip columns already mapped to a field
+        const cellValue = String(value ?? '').trim()
+        if (cellValue && BUYER_STATUS_MARKERS.has(cellValue.toLowerCase())) {
+          mapped.buyer = key // column header is the buyer name
+          break
+        }
+      }
     }
     return mapped as unknown as ParsedRow
   })

@@ -6,8 +6,8 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Select } from '@/components/ui/select'
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@/components/ui/table'
-import { Loader2, ArrowRight, X } from 'lucide-react'
-import { LEADVAULT_FIELDS, FIXED_VALUE_PREFIX } from '@/lib/utils/excel-parser'
+import { Loader2, ArrowRight, X, Info } from 'lucide-react'
+import { LEADVAULT_FIELDS, FIXED_VALUE_PREFIX, BUYER_STATUS_MARKERS } from '@/lib/utils/excel-parser'
 import { PRODUCTS } from '@/lib/constants'
 import type { ColumnMapping, PreviewResponse } from '@/lib/types'
 
@@ -22,9 +22,6 @@ interface ColumnMappingStepProps {
 
 const UNMAPPED = '__unmapped__'
 
-/** Status markers in buyer columns — cell says "Sold" but the buyer is the column header */
-const BUYER_STATUS_MARKERS = new Set(['sold', 'yes', 'y', '1', 'true', 'x'])
-
 /** Fields that have fixed value options shown directly in the dropdown */
 const FIELD_FIXED_OPTIONS: Record<string, readonly string[]> = {
   product: PRODUCTS,
@@ -33,11 +30,14 @@ const FIELD_FIXED_OPTIONS: Record<string, readonly string[]> = {
 /** Fields that only allow fixed value selection (no CSV column mapping) */
 const FIXED_ONLY_FIELDS = new Set(['product'])
 
+/** Fields user can map via dropdown (excludes auto-detect fields like buyer) */
+const MAPPABLE_FIELDS = LEADVAULT_FIELDS.filter((f) => !f.autoDetect)
+
 export function ColumnMappingStep({ preview, onConfirm, onCancel, importing }: ColumnMappingStepProps) {
   const [leadAge, setLeadAge] = useState<LeadAge>('new')
   const [mapping, setMapping] = useState<ColumnMapping>(() => {
     const initial: ColumnMapping = {}
-    for (const field of LEADVAULT_FIELDS) {
+    for (const field of MAPPABLE_FIELDS) {
       initial[field.key] = preview.suggested_mapping[field.key] || ''
     }
     return initial
@@ -52,7 +52,7 @@ export function ColumnMappingStep({ preview, onConfirm, onCancel, importing }: C
   }, [mapping])
 
   const requiredMissing = useMemo(() => {
-    return LEADVAULT_FIELDS
+    return MAPPABLE_FIELDS
       .filter((f) => f.required && !mapping[f.key])
       .map((f) => f.label)
   }, [mapping])
@@ -76,29 +76,46 @@ export function ColumnMappingStep({ preview, onConfirm, onCancel, importing }: C
     }))
   }
 
-  // Build preview rows mapped through current mapping
+  // Detect unique buyer names from sample rows (unmapped columns with status markers)
+  const detectedBuyers = useMemo(() => {
+    const buyers = new Set<string>()
+    for (const row of preview.sample_rows) {
+      for (const [header, cellValue] of Object.entries(row)) {
+        if (usedHeaders.has(header)) continue
+        if (cellValue && BUYER_STATUS_MARKERS.has(cellValue.toLowerCase())) {
+          buyers.add(header)
+        }
+      }
+    }
+    return Array.from(buyers).sort()
+  }, [preview.sample_rows, usedHeaders])
+
+  // Build preview rows mapped through current mapping + auto-detected buyer
   const mappedPreviewRows = useMemo(() => {
     return preview.sample_rows.map((row) => {
       const mapped: Record<string, string> = {}
-      for (const field of LEADVAULT_FIELDS) {
+      for (const field of MAPPABLE_FIELDS) {
         const value = mapping[field.key]
         if (value?.startsWith(FIXED_VALUE_PREFIX)) {
           mapped[field.key] = value.slice(FIXED_VALUE_PREFIX.length)
         } else if (value) {
-          const cellValue = row[value] ?? ''
-          // Buyer column: if cell is empty or a status marker like "Sold", the column header IS the buyer name
-          if (field.key === 'buyer' && (!cellValue || BUYER_STATUS_MARKERS.has(cellValue.toLowerCase()))) {
-            mapped[field.key] = value // column header IS the buyer name
-          } else {
-            mapped[field.key] = cellValue
-          }
+          mapped[field.key] = row[value] ?? ''
         } else {
           mapped[field.key] = ''
         }
       }
+      // Auto-detect buyer from unmapped columns with status markers
+      for (const [header, cellValue] of Object.entries(row)) {
+        if (usedHeaders.has(header)) continue
+        if (cellValue && BUYER_STATUS_MARKERS.has(cellValue.toLowerCase())) {
+          mapped.buyer = header
+          break
+        }
+      }
+      if (!mapped.buyer) mapped.buyer = ''
       return mapped
     })
-  }, [preview.sample_rows, mapping])
+  }, [preview.sample_rows, mapping, usedHeaders])
 
   return (
     <div className="space-y-6">
@@ -113,7 +130,7 @@ export function ColumnMappingStep({ preview, onConfirm, onCancel, importing }: C
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {LEADVAULT_FIELDS.map((field) => {
+          {MAPPABLE_FIELDS.map((field) => {
             const currentValue = mapping[field.key]
             const isFixed = currentValue?.startsWith(FIXED_VALUE_PREFIX)
             const isDuplicate = currentValue && !isFixed && duplicates.has(currentValue)
@@ -171,6 +188,26 @@ export function ColumnMappingStep({ preview, onConfirm, onCancel, importing }: C
             )
           })}
 
+          {/* Buyer auto-detection info */}
+          <div className="flex items-center gap-3">
+            <div className="w-36 flex items-center gap-2 shrink-0">
+              <span className="text-sm font-medium">Buyer</span>
+            </div>
+            <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0" />
+            <div className="flex-1 flex items-center gap-2 text-sm text-muted-foreground">
+              <Info className="h-4 w-4 shrink-0" />
+              {detectedBuyers.length > 0 ? (
+                <span>
+                  Auto-detected: {detectedBuyers.map((b, i) => (
+                    <Badge key={b} variant="secondary" className="mx-0.5">{b}</Badge>
+                  ))}
+                </span>
+              ) : (
+                <span>Auto-detected from columns containing &quot;Sold&quot;</span>
+              )}
+            </div>
+          </div>
+
           <div className="pt-2 border-t">
             <label className="text-sm font-medium block mb-2">Lead Age</label>
             <div className="flex gap-4">
@@ -222,6 +259,13 @@ export function ColumnMappingStep({ preview, onConfirm, onCancel, importing }: C
               <TableHeader>
                 <TableRow>
                   {LEADVAULT_FIELDS.map((field) => {
+                    if (field.autoDetect) {
+                      return (
+                        <TableHead key={field.key}>
+                          {field.label} (auto)
+                        </TableHead>
+                      )
+                    }
                     const value = mapping[field.key]
                     const isFieldFixed = value?.startsWith(FIXED_VALUE_PREFIX)
                     return (
@@ -238,6 +282,13 @@ export function ColumnMappingStep({ preview, onConfirm, onCancel, importing }: C
                 {mappedPreviewRows.map((row, i) => (
                   <TableRow key={i}>
                     {LEADVAULT_FIELDS.map((field) => {
+                      if (field.autoDetect) {
+                        return (
+                          <TableCell key={field.key} className={row[field.key] ? 'text-green-600' : 'text-muted-foreground/40 italic'}>
+                            {row[field.key] || '—'}
+                          </TableCell>
+                        )
+                      }
                       const value = mapping[field.key]
                       const isFieldFixed = value?.startsWith(FIXED_VALUE_PREFIX)
                       return (
