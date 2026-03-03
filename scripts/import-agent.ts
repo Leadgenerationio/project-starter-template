@@ -86,6 +86,7 @@ async function processJob(jobId: string) {
     const mapped: Record<string, string> = {}
     if (columnMapping) {
       Object.assign(mapped, fixedValues)
+      const buyerColumn = Object.entries(reverseMap).find(([, field]) => field === 'buyer')?.[0]
       for (const [key, value] of Object.entries(row)) {
         const targetField = reverseMap[key]
         if (targetField) {
@@ -97,6 +98,10 @@ async function processJob(jobId: string) {
             mapped[targetField] = cellValue
           }
         }
+      }
+      // If buyer is mapped to a column but cell was empty (XLSX omits empty cells), use column header
+      if (buyerColumn && !mapped.buyer) {
+        mapped.buyer = buyerColumn
       }
     } else {
       for (const [key, value] of Object.entries(row)) {

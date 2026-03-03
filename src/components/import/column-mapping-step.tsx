@@ -86,8 +86,8 @@ export function ColumnMappingStep({ preview, onConfirm, onCancel, importing }: C
           mapped[field.key] = value.slice(FIXED_VALUE_PREFIX.length)
         } else if (value) {
           const cellValue = row[value] ?? ''
-          // Buyer column: if cell is a status marker like "Sold", show column header as buyer name
-          if (field.key === 'buyer' && cellValue && BUYER_STATUS_MARKERS.has(cellValue.toLowerCase())) {
+          // Buyer column: if cell is empty or a status marker like "Sold", the column header IS the buyer name
+          if (field.key === 'buyer' && (!cellValue || BUYER_STATUS_MARKERS.has(cellValue.toLowerCase()))) {
             mapped[field.key] = value // column header IS the buyer name
           } else {
             mapped[field.key] = cellValue

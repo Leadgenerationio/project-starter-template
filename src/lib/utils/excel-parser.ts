@@ -148,6 +148,9 @@ export function applyColumnMapping(buffer: ArrayBuffer, mapping: ColumnMapping):
     }
   }
 
+  // Find the column header mapped to the buyer field (if any, and not a fixed value)
+  const buyerColumn = Object.entries(reverseMap).find(([, field]) => field === 'buyer')?.[0]
+
   return rawData.map((row) => {
     const mapped: Record<string, string> = { ...fixedValues }
     for (const [key, value] of Object.entries(row)) {
@@ -161,6 +164,10 @@ export function applyColumnMapping(buffer: ArrayBuffer, mapping: ColumnMapping):
           mapped[targetField] = cellValue
         }
       }
+    }
+    // If buyer is mapped to a column but cell was empty (XLSX omits empty cells), use column header
+    if (buyerColumn && !mapped.buyer) {
+      mapped.buyer = buyerColumn
     }
     return mapped as unknown as ParsedRow
   })

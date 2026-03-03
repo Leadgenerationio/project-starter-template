@@ -27,6 +27,11 @@ const columns: ColumnDef<Lead, unknown>[] = [
     header: 'Product',
   },
   {
+    id: 'original_buyer',
+    header: 'Original Buyer',
+    cell: ({ row }) => row.original.original_buyer?.company_name ?? '—',
+  },
+  {
     accessorKey: 'status',
     header: 'Status',
     cell: ({ row }) => <LeadStatusBadge status={row.original.status as LeadStatus} />,

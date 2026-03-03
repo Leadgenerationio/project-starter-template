@@ -91,6 +91,10 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
               <span>{lead.source}</span>
             </div>
             <div className="flex justify-between">
+              <span className="text-muted-foreground">Original Buyer</span>
+              <span>{lead.original_buyer?.company_name ?? '—'}</span>
+            </div>
+            <div className="flex justify-between">
               <span className="text-muted-foreground">Created</span>
               <span>{formatDate(lead.created_at)}</span>
             </div>
