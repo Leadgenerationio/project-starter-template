@@ -4,6 +4,9 @@ import type { ColumnMapping } from '@/lib/types'
 /** Prefix for fixed values in column mapping (not mapped to a CSV column) */
 export const FIXED_VALUE_PREFIX = '__fixed__:'
 
+/** Prefix for buyer column selection — stores comma-separated column headers */
+export const BUYER_COLS_PREFIX = '__buyer_cols__:'
+
 export interface ParsedRow {
   first_name: string
   last_name: string
@@ -140,12 +143,15 @@ export function applyColumnMapping(buffer: ArrayBuffer, mapping: ColumnMapping):
   const sheet = workbook.Sheets[sheetName]
   const rawData = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet)
 
-  // Separate fixed values from column mappings
+  // Separate fixed values, buyer columns, and regular column mappings
   const fixedValues: Record<string, string> = {}
   const reverseMap: Record<string, string> = {}
+  let buyerColumns: Set<string> | null = null
   for (const [fieldKey, value] of Object.entries(mapping)) {
     if (value.startsWith(FIXED_VALUE_PREFIX)) {
       fixedValues[fieldKey] = value.slice(FIXED_VALUE_PREFIX.length)
+    } else if (value.startsWith(BUYER_COLS_PREFIX)) {
+      buyerColumns = new Set(value.slice(BUYER_COLS_PREFIX.length).split(',').filter(Boolean))
     } else if (value) {
       reverseMap[value] = fieldKey
     }
@@ -159,14 +165,14 @@ export function applyColumnMapping(buffer: ArrayBuffer, mapping: ColumnMapping):
         mapped[targetField] = String(value ?? '').trim()
       }
     }
-    // Auto-detect buyer: scan unmapped columns for status markers like "Sold"
+    // Buyer detection: scan user-selected buyer columns for status markers
     // The column header IS the buyer name (supports multiple buyer columns)
-    if (!mapped.buyer) {
+    if (!mapped.buyer && buyerColumns) {
       for (const [key, value] of Object.entries(row)) {
-        if (reverseMap[key]) continue // skip columns already mapped to a field
+        if (!buyerColumns.has(key)) continue
         const cellValue = String(value ?? '').trim()
         if (cellValue && BUYER_STATUS_MARKERS.has(cellValue.toLowerCase())) {
-          mapped.buyer = key // column header is the buyer name
+          mapped.buyer = key
           break
         }
       }

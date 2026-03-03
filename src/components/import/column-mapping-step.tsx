@@ -6,8 +6,8 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Select } from '@/components/ui/select'
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@/components/ui/table'
-import { Loader2, ArrowRight, X, Info } from 'lucide-react'
-import { LEADVAULT_FIELDS, FIXED_VALUE_PREFIX, BUYER_STATUS_MARKERS } from '@/lib/utils/excel-parser'
+import { Loader2, ArrowRight, X } from 'lucide-react'
+import { LEADVAULT_FIELDS, FIXED_VALUE_PREFIX, BUYER_COLS_PREFIX, BUYER_STATUS_MARKERS } from '@/lib/utils/excel-parser'
 import { PRODUCTS } from '@/lib/constants'
 import type { ColumnMapping, PreviewResponse } from '@/lib/types'
 
@@ -42,6 +42,7 @@ export function ColumnMappingStep({ preview, onConfirm, onCancel, importing }: C
     }
     return initial
   })
+  const [buyerColumns, setBuyerColumns] = useState<Set<string>>(new Set())
 
   const usedHeaders = useMemo(() => {
     const used = new Set<string>()
@@ -50,6 +51,11 @@ export function ColumnMappingStep({ preview, onConfirm, onCancel, importing }: C
     }
     return used
   }, [mapping])
+
+  // Columns not mapped to any field — candidates for buyer columns
+  const unmappedHeaders = useMemo(() => {
+    return preview.headers.filter((h) => !usedHeaders.has(h))
+  }, [preview.headers, usedHeaders])
 
   const requiredMissing = useMemo(() => {
     return MAPPABLE_FIELDS
@@ -76,21 +82,28 @@ export function ColumnMappingStep({ preview, onConfirm, onCancel, importing }: C
     }))
   }
 
-  // Detect unique buyer names from sample rows (unmapped columns with status markers)
-  const detectedBuyers = useMemo(() => {
-    const buyers = new Set<string>()
-    for (const row of preview.sample_rows) {
-      for (const [header, cellValue] of Object.entries(row)) {
-        if (usedHeaders.has(header)) continue
-        if (cellValue && BUYER_STATUS_MARKERS.has(cellValue.toLowerCase())) {
-          buyers.add(header)
-        }
+  function toggleBuyerColumn(header: string) {
+    setBuyerColumns((prev) => {
+      const next = new Set(prev)
+      if (next.has(header)) {
+        next.delete(header)
+      } else {
+        next.add(header)
       }
-    }
-    return Array.from(buyers).sort()
-  }, [preview.sample_rows, usedHeaders])
+      return next
+    })
+  }
 
-  // Build preview rows mapped through current mapping + auto-detected buyer
+  // Build final mapping including buyer columns
+  function getFinalMapping(): ColumnMapping {
+    const final = { ...mapping }
+    if (buyerColumns.size > 0) {
+      final.buyer = BUYER_COLS_PREFIX + Array.from(buyerColumns).join(',')
+    }
+    return final
+  }
+
+  // Build preview rows mapped through current mapping + selected buyer columns
   const mappedPreviewRows = useMemo(() => {
     return preview.sample_rows.map((row) => {
       const mapped: Record<string, string> = {}
@@ -104,18 +117,18 @@ export function ColumnMappingStep({ preview, onConfirm, onCancel, importing }: C
           mapped[field.key] = ''
         }
       }
-      // Auto-detect buyer from unmapped columns with status markers
-      for (const [header, cellValue] of Object.entries(row)) {
-        if (usedHeaders.has(header)) continue
+      // Detect buyer from selected buyer columns
+      mapped.buyer = ''
+      for (const header of buyerColumns) {
+        const cellValue = row[header] ?? ''
         if (cellValue && BUYER_STATUS_MARKERS.has(cellValue.toLowerCase())) {
           mapped.buyer = header
           break
         }
       }
-      if (!mapped.buyer) mapped.buyer = ''
       return mapped
     })
-  }, [preview.sample_rows, mapping, usedHeaders])
+  }, [preview.sample_rows, mapping, buyerColumns])
 
   return (
     <div className="space-y-6">
@@ -188,22 +201,39 @@ export function ColumnMappingStep({ preview, onConfirm, onCancel, importing }: C
             )
           })}
 
-          {/* Buyer auto-detection info */}
-          <div className="flex items-center gap-3">
-            <div className="w-36 flex items-center gap-2 shrink-0">
-              <span className="text-sm font-medium">Buyer</span>
+          {/* Buyer column selection */}
+          <div className="flex items-start gap-3">
+            <div className="w-36 flex items-center gap-2 shrink-0 pt-1">
+              <span className="text-sm font-medium">Buyer Columns</span>
             </div>
-            <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0" />
-            <div className="flex-1 flex items-center gap-2 text-sm text-muted-foreground">
-              <Info className="h-4 w-4 shrink-0" />
-              {detectedBuyers.length > 0 ? (
-                <span>
-                  Auto-detected: {detectedBuyers.map((b, i) => (
-                    <Badge key={b} variant="secondary" className="mx-0.5">{b}</Badge>
+            <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0 mt-1" />
+            <div className="flex-1">
+              <p className="text-xs text-muted-foreground mb-2">
+                Select columns that contain buyer names (with &quot;Sold&quot; markers)
+              </p>
+              {unmappedHeaders.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {unmappedHeaders.map((header) => (
+                    <label
+                      key={header}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-sm cursor-pointer select-none transition-colors ${
+                        buyerColumns.has(header)
+                          ? 'bg-primary text-primary-foreground border-primary'
+                          : 'bg-background hover:bg-muted border-input'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={buyerColumns.has(header)}
+                        onChange={() => toggleBuyerColumn(header)}
+                        className="sr-only"
+                      />
+                      {header}
+                    </label>
                   ))}
-                </span>
+                </div>
               ) : (
-                <span>Auto-detected from columns containing &quot;Sold&quot;</span>
+                <p className="text-sm text-muted-foreground">No unmapped columns available</p>
               )}
             </div>
           </div>
@@ -262,7 +292,8 @@ export function ColumnMappingStep({ preview, onConfirm, onCancel, importing }: C
                     if (field.autoDetect) {
                       return (
                         <TableHead key={field.key}>
-                          {field.label} (auto)
+                          {field.label}
+                          {buyerColumns.size > 0 ? '' : ' (none selected)'}
                         </TableHead>
                       )
                     }
@@ -312,7 +343,7 @@ export function ColumnMappingStep({ preview, onConfirm, onCancel, importing }: C
       </Card>
 
       <div className="flex gap-3">
-        <Button onClick={() => onConfirm(mapping, leadAge)} disabled={!canConfirm || importing}>
+        <Button onClick={() => onConfirm(getFinalMapping(), leadAge)} disabled={!canConfirm || importing}>
           {importing ? (
             <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Importing...</>
           ) : (

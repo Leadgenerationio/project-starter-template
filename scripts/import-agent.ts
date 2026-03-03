@@ -65,13 +65,17 @@ async function processJob(jobId: string) {
 
   // Build reverse mapping from column_mapping if present (csvHeader → fieldKey)
   const FIXED_PREFIX = '__fixed__:'
+  const BUYER_COLS_PREFIX = '__buyer_cols__:'
   const columnMapping: Record<string, string> | null = job.column_mapping
   const reverseMap: Record<string, string> = {}
   const fixedValues: Record<string, string> = {}
+  let buyerColumns: Set<string> | null = null
   if (columnMapping) {
     for (const [fieldKey, value] of Object.entries(columnMapping)) {
       if (value.startsWith(FIXED_PREFIX)) {
         fixedValues[fieldKey] = value.slice(FIXED_PREFIX.length)
+      } else if (value.startsWith(BUYER_COLS_PREFIX)) {
+        buyerColumns = new Set(value.slice(BUYER_COLS_PREFIX.length).split(',').filter(Boolean))
       } else if (value) {
         reverseMap[value] = fieldKey
       }
@@ -99,11 +103,16 @@ async function processJob(jobId: string) {
         mapped[mappedKey] = String(value ?? '').trim()
       }
     }
-    // Auto-detect buyer: scan unmapped columns for status markers like "Sold"
-    // The column header IS the buyer name (supports multiple buyer columns)
+    // Detect buyer from selected buyer columns (or auto-detect from unmapped columns)
     if (!mapped.buyer) {
       for (const [key, value] of Object.entries(row)) {
-        if (columnMapping ? reverseMap[key] : HEADER_MAP[key.toLowerCase().trim()]) continue
+        // If buyer columns were explicitly selected, only scan those
+        if (buyerColumns) {
+          if (!buyerColumns.has(key)) continue
+        } else {
+          // Fallback: scan unmapped columns
+          if (columnMapping ? reverseMap[key] : HEADER_MAP[key.toLowerCase().trim()]) continue
+        }
         const cellValue = String(value ?? '').trim()
         if (cellValue && BUYER_STATUS_MARKERS.has(cellValue.toLowerCase())) {
           mapped.buyer = key
