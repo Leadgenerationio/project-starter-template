@@ -2,25 +2,25 @@
 
 @theme {
   --color-background: #ffffff;
-  --color-foreground: #0a0a0a;
-  --color-muted: #f5f5f5;
-  --color-muted-foreground: #737373;
+  --color-foreground: #0f172a;
+  --color-muted: #f1f5f9;
+  --color-muted-foreground: #64748b;
   --color-popover: #ffffff;
-  --color-popover-foreground: #0a0a0a;
+  --color-popover-foreground: #0f172a;
   --color-card: #ffffff;
-  --color-card-foreground: #0a0a0a;
-  --color-border: #e5e5e5;
-  --color-input: #e5e5e5;
-  --color-primary: #171717;
-  --color-primary-foreground: #fafafa;
-  --color-secondary: #f5f5f5;
-  --color-secondary-foreground: #171717;
-  --color-accent: #f5f5f5;
-  --color-accent-foreground: #171717;
+  --color-card-foreground: #0f172a;
+  --color-border: #e2e8f0;
+  --color-input: #e2e8f0;
+  --color-primary: #0c7792;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #f1f5f9;
+  --color-secondary-foreground: #0f172a;
+  --color-accent: #f1f5f9;
+  --color-accent-foreground: #0f172a;
   --color-destructive: #ef4444;
-  --color-destructive-foreground: #fafafa;
-  --color-ring: #0a0a0a;
-  --radius: 0.5rem;
+  --color-destructive-foreground: #ffffff;
+  --color-ring: #0c7792;
+  --radius: 0.625rem;
 }
 
 @layer base {
@@ -31,6 +31,6 @@
   }
 
   body {
-    @apply bg-background text-foreground;
+    @apply bg-muted/40 text-foreground antialiased;
   }
 }
