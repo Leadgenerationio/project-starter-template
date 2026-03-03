@@ -29,6 +29,9 @@ const HEADER_MAP: Record<string, string> = {
   'company': 'buyer', 'company name': 'buyer', 'company_name': 'buyer',
 }
 
+/** Status markers in buyer columns — cell says "Sold" but the buyer is the column header */
+const BUYER_STATUS_MARKERS = new Set(['sold', 'yes', 'y', '1', 'true', 'x'])
+
 const BATCH_SIZE = 50
 const PROGRESS_INTERVAL = 10
 
@@ -85,7 +88,15 @@ async function processJob(jobId: string) {
       Object.assign(mapped, fixedValues)
       for (const [key, value] of Object.entries(row)) {
         const targetField = reverseMap[key]
-        if (targetField) mapped[targetField] = String(value ?? '').trim()
+        if (targetField) {
+          const cellValue = String(value ?? '').trim()
+          // Buyer column: if cell is a status marker like "Sold", the column header IS the buyer name
+          if (targetField === 'buyer' && cellValue && BUYER_STATUS_MARKERS.has(cellValue.toLowerCase())) {
+            mapped[targetField] = key
+          } else {
+            mapped[targetField] = cellValue
+          }
+        }
       }
     } else {
       for (const [key, value] of Object.entries(row)) {

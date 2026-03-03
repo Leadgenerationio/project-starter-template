@@ -127,6 +127,9 @@ export function suggestMapping(csvHeaders: string[]): ColumnMapping {
   return mapping
 }
 
+/** Status markers in buyer columns — cell says "Sold" but the buyer is the column header */
+const BUYER_STATUS_MARKERS = new Set(['sold', 'yes', 'y', '1', 'true', 'x'])
+
 /** Parse file applying user-chosen column mapping instead of HEADER_MAP */
 export function applyColumnMapping(buffer: ArrayBuffer, mapping: ColumnMapping): ParsedRow[] {
   const workbook = XLSX.read(buffer, { type: 'array' })
@@ -150,7 +153,13 @@ export function applyColumnMapping(buffer: ArrayBuffer, mapping: ColumnMapping):
     for (const [key, value] of Object.entries(row)) {
       const targetField = reverseMap[key]
       if (targetField) {
-        mapped[targetField] = String(value ?? '').trim()
+        const cellValue = String(value ?? '').trim()
+        // Buyer column: if cell is a status marker like "Sold", the column header IS the buyer name
+        if (targetField === 'buyer' && cellValue && BUYER_STATUS_MARKERS.has(cellValue.toLowerCase())) {
+          mapped[targetField] = key
+        } else {
+          mapped[targetField] = cellValue
+        }
       }
     }
     return mapped as unknown as ParsedRow

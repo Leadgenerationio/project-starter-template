@@ -22,6 +22,9 @@ interface ColumnMappingStepProps {
 
 const UNMAPPED = '__unmapped__'
 
+/** Status markers in buyer columns — cell says "Sold" but the buyer is the column header */
+const BUYER_STATUS_MARKERS = new Set(['sold', 'yes', 'y', '1', 'true', 'x'])
+
 /** Fields that have fixed value options shown directly in the dropdown */
 const FIELD_FIXED_OPTIONS: Record<string, readonly string[]> = {
   product: PRODUCTS,
@@ -82,7 +85,13 @@ export function ColumnMappingStep({ preview, onConfirm, onCancel, importing }: C
         if (value?.startsWith(FIXED_VALUE_PREFIX)) {
           mapped[field.key] = value.slice(FIXED_VALUE_PREFIX.length)
         } else if (value) {
-          mapped[field.key] = row[value] ?? ''
+          const cellValue = row[value] ?? ''
+          // Buyer column: if cell is a status marker like "Sold", show column header as buyer name
+          if (field.key === 'buyer' && cellValue && BUYER_STATUS_MARKERS.has(cellValue.toLowerCase())) {
+            mapped[field.key] = value // column header IS the buyer name
+          } else {
+            mapped[field.key] = cellValue
+          }
         } else {
           mapped[field.key] = ''
         }
