@@ -1,16 +1,7 @@
 export const PRODUCTS = [
-  'Life Insurance',
-  'Home Insurance',
-  'Auto Insurance',
-  'Health Insurance',
-  'Travel Insurance',
-  'Pet Insurance',
-  'Business Insurance',
-  'Mortgage',
-  'Personal Loan',
-  'Credit Card',
-  'Savings Account',
-  'Investment',
+  'Solar Panels',
+  'Insulation',
+  'Windows & Doors',
 ] as const
 
 export type Product = (typeof PRODUCTS)[number]

@@ -12,9 +12,7 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 const PRODUCTS = [
-  'Life Insurance', 'Home Insurance', 'Auto Insurance', 'Health Insurance',
-  'Travel Insurance', 'Pet Insurance', 'Business Insurance', 'Mortgage',
-  'Personal Loan', 'Credit Card', 'Savings Account', 'Investment',
+  'Solar Panels', 'Insulation', 'Windows & Doors',
 ]
 
 const SOURCES = ['Website', 'Referral', 'Cold Call', 'Social Media', 'Email Campaign', 'Partner', 'Event', 'Other']
@@ -61,11 +59,17 @@ async function processJob(jobId: string) {
   const rawData = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet)
 
   // Build reverse mapping from column_mapping if present (csvHeader → fieldKey)
+  const FIXED_PREFIX = '__fixed__:'
   const columnMapping: Record<string, string> | null = job.column_mapping
   const reverseMap: Record<string, string> = {}
+  const fixedValues: Record<string, string> = {}
   if (columnMapping) {
-    for (const [fieldKey, csvHeader] of Object.entries(columnMapping)) {
-      if (csvHeader) reverseMap[csvHeader] = fieldKey
+    for (const [fieldKey, value] of Object.entries(columnMapping)) {
+      if (value.startsWith(FIXED_PREFIX)) {
+        fixedValues[fieldKey] = value.slice(FIXED_PREFIX.length)
+      } else if (value) {
+        reverseMap[value] = fieldKey
+      }
     }
   }
 
@@ -82,7 +86,8 @@ async function processJob(jobId: string) {
     const mapped: Record<string, string> = {}
 
     if (columnMapping) {
-      // Use user-defined column mapping
+      // Apply fixed values first, then column mappings
+      Object.assign(mapped, fixedValues)
       for (const [key, value] of Object.entries(row)) {
         const targetField = reverseMap[key]
         if (targetField) {

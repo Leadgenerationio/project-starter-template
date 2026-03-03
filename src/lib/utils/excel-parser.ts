@@ -1,6 +1,9 @@
 import * as XLSX from 'xlsx'
 import type { ColumnMapping } from '@/lib/types'
 
+/** Prefix for fixed values in column mapping (not mapped to a CSV column) */
+export const FIXED_VALUE_PREFIX = '__fixed__:'
+
 export interface ParsedRow {
   first_name: string
   last_name: string
@@ -124,16 +127,19 @@ export function applyColumnMapping(buffer: ArrayBuffer, mapping: ColumnMapping):
   const sheet = workbook.Sheets[sheetName]
   const rawData = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet)
 
-  // Invert the mapping: csvHeader → leadVaultField
+  // Separate fixed values from column mappings
+  const fixedValues: Record<string, string> = {}
   const reverseMap: Record<string, string> = {}
-  for (const [fieldKey, csvHeader] of Object.entries(mapping)) {
-    if (csvHeader) {
-      reverseMap[csvHeader] = fieldKey
+  for (const [fieldKey, value] of Object.entries(mapping)) {
+    if (value.startsWith(FIXED_VALUE_PREFIX)) {
+      fixedValues[fieldKey] = value.slice(FIXED_VALUE_PREFIX.length)
+    } else if (value) {
+      reverseMap[value] = fieldKey
     }
   }
 
   return rawData.map((row) => {
-    const mapped: Record<string, string> = {}
+    const mapped: Record<string, string> = { ...fixedValues }
     for (const [key, value] of Object.entries(row)) {
       const targetField = reverseMap[key]
       if (targetField) {
