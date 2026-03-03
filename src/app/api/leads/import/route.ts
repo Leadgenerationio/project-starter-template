@@ -43,7 +43,7 @@ async function handleMappedImport(
     return NextResponse.json({ error: issue.message }, { status: 400 })
   }
 
-  const { storage_path, filename, column_mapping } = parsed.data
+  const { storage_path, filename, column_mapping, lead_age } = parsed.data
 
   // Download file from storage
   const { data: fileData, error: downloadError } = await supabase.storage
@@ -66,7 +66,7 @@ async function handleMappedImport(
   // Small files: process inline
   if (rows.length <= INLINE_IMPORT_THRESHOLD) {
     try {
-      return await processInline(supabase, orgId, userId, filename, rows, column_mapping)
+      return await processInline(supabase, orgId, userId, filename, rows, column_mapping, lead_age)
     } finally {
       // Always clean up storage file after inline processing, even on failure
       await supabase.storage.from('imports').remove([storage_path])
@@ -180,16 +180,38 @@ async function processInline(
   filename: string,
   rows: ParsedRow[],
   columnMapping?: ColumnMapping,
+  leadAge?: string,
 ) {
   const errors: ImportError[] = []
+  const isEligible = leadAge === 'eligible'
 
-  // Collect unique buyer names from the raw rows (before Zod strips extra fields)
+  // For eligible leads, backdate created_at so aging agent leaves them alone
+  const eligibleDate = isEligible
+    ? new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString()
+    : undefined
+
+  // --- Deduplication: load existing phone numbers from last 30 days ---
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+  const existingPhones = new Set<string>()
+  const { data: existingLeads } = await supabase
+    .from('leads')
+    .select('phone')
+    .eq('org_id', orgId)
+    .gte('created_at', thirtyDaysAgo)
+    .not('phone', 'is', null)
+  if (existingLeads) {
+    for (const lead of existingLeads) {
+      if (lead.phone) existingPhones.add(lead.phone.replace(/\s+/g, ''))
+    }
+  }
+  let duplicateCount = 0
+
+  // --- Buyer auto-creation ---
   const buyerNames = new Set<string>()
   for (const row of rows) {
     if (row.buyer?.trim()) buyerNames.add(row.buyer.trim())
   }
 
-  // Build buyer name → id map by looking up existing + auto-creating missing
   const buyerIdMap = new Map<string, string>()
   if (buyerNames.size > 0) {
     const { data: existingBuyers } = await supabase
@@ -204,7 +226,6 @@ async function processInline(
       }
     }
 
-    // Auto-create any missing buyers
     const missingNames = Array.from(buyerNames).filter((n) => !buyerIdMap.has(n))
     if (missingNames.length > 0) {
       const newBuyers = missingNames.map((name) => ({
@@ -214,10 +235,13 @@ async function processInline(
         email: `${name.toLowerCase().replace(/[^a-z0-9]/g, '')}@imported.local`,
         is_active: true,
       }))
-      const { data: created } = await supabase
+      const { data: created, error: buyerError } = await supabase
         .from('buyers')
         .insert(newBuyers)
         .select('id, company_name')
+      if (buyerError) {
+        errors.push({ row: 0, field: 'buyer', message: `Failed to create buyers: ${buyerError.message}` })
+      }
       if (created) {
         for (const b of created) {
           buyerIdMap.set(b.company_name, b.id)
@@ -226,6 +250,7 @@ async function processInline(
     }
   }
 
+  // --- Validate and build leads ---
   const validLeads: Record<string, unknown>[] = []
 
   for (let i = 0; i < rows.length; i++) {
@@ -233,21 +258,33 @@ async function processInline(
     if (!result.success) {
       const issue = result.error.issues[0]
       errors.push({ row: i + 2, field: String(issue.path[0] ?? ''), message: issue.message })
-    } else {
-      const buyerName = rows[i].buyer?.trim()
-      validLeads.push({
-        org_id: orgId,
-        first_name: result.data.first_name,
-        last_name: result.data.last_name,
-        email: result.data.email,
-        phone: result.data.phone ?? null,
-        postcode: result.data.postcode,
-        product: result.data.product,
-        source: result.data.source ?? 'Website',
-        status: 'new',
-        original_buyer_id: (buyerName && buyerIdMap.get(buyerName)) ?? null,
-      })
+      continue
     }
+
+    // Dedup check: skip if phone number exists in last 30 days
+    const phone = (result.data.phone ?? '').replace(/\s+/g, '')
+    if (phone && existingPhones.has(phone)) {
+      duplicateCount++
+      continue
+    }
+    // Also track within this batch to avoid importing duplicates from the same file
+    if (phone) existingPhones.add(phone)
+
+    const buyerName = rows[i].buyer?.trim()
+    const lead: Record<string, unknown> = {
+      org_id: orgId,
+      first_name: result.data.first_name,
+      last_name: result.data.last_name,
+      email: result.data.email,
+      phone: result.data.phone ?? null,
+      postcode: result.data.postcode,
+      product: result.data.product,
+      source: result.data.source ?? 'Website',
+      status: isEligible ? 'eligible' : 'new',
+      original_buyer_id: (buyerName && buyerIdMap.get(buyerName)) ?? null,
+    }
+    if (eligibleDate) lead.created_at = eligibleDate
+    validLeads.push(lead)
   }
 
   // Batch insert valid leads in chunks
@@ -265,6 +302,11 @@ async function processInline(
         )
       }
     }
+  }
+
+  // Add duplicate info to errors list so UI can report it
+  if (duplicateCount > 0) {
+    errors.push({ row: 0, field: 'phone', message: `${duplicateCount} duplicate leads skipped (phone number already imported in last 30 days)` })
   }
 
   // Create a completed job record so the UI can show results

@@ -11,9 +11,11 @@ import { LEADVAULT_FIELDS, FIXED_VALUE_PREFIX } from '@/lib/utils/excel-parser'
 import { PRODUCTS } from '@/lib/constants'
 import type { ColumnMapping, PreviewResponse } from '@/lib/types'
 
+export type LeadAge = 'new' | 'eligible'
+
 interface ColumnMappingStepProps {
   preview: PreviewResponse
-  onConfirm: (mapping: ColumnMapping) => void
+  onConfirm: (mapping: ColumnMapping, leadAge: LeadAge) => void
   onCancel: () => void
   importing: boolean
 }
@@ -29,6 +31,7 @@ const FIELD_FIXED_OPTIONS: Record<string, readonly string[]> = {
 const FIXED_ONLY_FIELDS = new Set(['product'])
 
 export function ColumnMappingStep({ preview, onConfirm, onCancel, importing }: ColumnMappingStepProps) {
+  const [leadAge, setLeadAge] = useState<LeadAge>('new')
   const [mapping, setMapping] = useState<ColumnMapping>(() => {
     const initial: ColumnMapping = {}
     for (const field of LEADVAULT_FIELDS) {
@@ -159,6 +162,34 @@ export function ColumnMappingStep({ preview, onConfirm, onCancel, importing }: C
             )
           })}
 
+          <div className="pt-2 border-t">
+            <label className="text-sm font-medium block mb-2">Lead Age</label>
+            <div className="flex gap-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="lead_age"
+                  value="new"
+                  checked={leadAge === 'new'}
+                  onChange={() => setLeadAge('new')}
+                  className="accent-primary"
+                />
+                <span className="text-sm">Under 30 days (New)</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="lead_age"
+                  value="eligible"
+                  checked={leadAge === 'eligible'}
+                  onChange={() => setLeadAge('eligible')}
+                  className="accent-primary"
+                />
+                <span className="text-sm">Over 30 days (Eligible to sell)</span>
+              </label>
+            </div>
+          </div>
+
           {requiredMissing.length > 0 && (
             <p className="text-sm text-destructive">
               Missing required fields: {requiredMissing.join(', ')}
@@ -221,7 +252,7 @@ export function ColumnMappingStep({ preview, onConfirm, onCancel, importing }: C
       </Card>
 
       <div className="flex gap-3">
-        <Button onClick={() => onConfirm(mapping)} disabled={!canConfirm || importing}>
+        <Button onClick={() => onConfirm(mapping, leadAge)} disabled={!canConfirm || importing}>
           {importing ? (
             <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Importing...</>
           ) : (

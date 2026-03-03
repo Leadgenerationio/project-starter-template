@@ -97,7 +97,31 @@ async function processJob(jobId: string) {
     return mapped
   })
 
-  // Auto-create buyers from mapped buyer column
+  // --- Deduplication: load existing phone numbers from last 30 days ---
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+  const existingPhones = new Set<string>()
+  let phonePage = 0
+  const PHONE_PAGE_SIZE = 1000
+  while (true) {
+    const { data: phoneBatch } = await supabase
+      .from('leads')
+      .select('phone')
+      .eq('org_id', job.org_id)
+      .gte('created_at', thirtyDaysAgo)
+      .not('phone', 'is', null)
+      .range(phonePage * PHONE_PAGE_SIZE, (phonePage + 1) * PHONE_PAGE_SIZE - 1)
+    if (!phoneBatch || phoneBatch.length === 0) break
+    for (const lead of phoneBatch) {
+      if (lead.phone) existingPhones.add(lead.phone.replace(/\s+/g, ''))
+    }
+    if (phoneBatch.length < PHONE_PAGE_SIZE) break
+    phonePage++
+  }
+  console.log(`Loaded ${existingPhones.size} existing phones for dedup`)
+  let duplicateCount = 0
+  const errors: { row: number; field: string; message: string }[] = []
+
+  // --- Auto-create buyers from mapped buyer column ---
   const buyerIdMap = new Map<string, string>()
   const buyerNames = new Set<string>()
   for (const m of allMapped) {
@@ -121,17 +145,27 @@ async function processJob(jobId: string) {
         email: `${name.toLowerCase().replace(/[^a-z0-9]/g, '')}@imported.local`,
         is_active: true,
       }))
-      const { data: created } = await supabase.from('buyers').insert(newBuyers).select('id, company_name')
+      const { data: created, error: buyerError } = await supabase.from('buyers').insert(newBuyers).select('id, company_name')
+      if (buyerError) {
+        console.error(`Failed to create buyers: ${buyerError.message}`)
+        errors.push({ row: 0, field: 'buyer', message: `Failed to create buyers: ${buyerError.message}` })
+      }
       if (created) {
         for (const b of created) buyerIdMap.set(b.company_name, b.id)
       }
     }
-    console.log(`Buyers: ${buyerIdMap.size} total (${buyerNames.size - buyerIdMap.size} failed to create)`)
+    console.log(`Buyers: ${buyerIdMap.size} resolved, ${missingNames.length} new`)
   }
+
+  // Determine lead status from job metadata (lead_age stored in column_mapping meta)
+  const leadAge = (job as Record<string, unknown>).lead_age as string | undefined
+  const isEligible = leadAge === 'eligible'
+  const eligibleDate = isEligible
+    ? new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString()
+    : undefined
 
   let successCount = 0
   let errorCount = 0
-  const errors: { row: number; field: string; message: string }[] = []
   const batch: Record<string, unknown>[] = []
 
   for (let i = 0; i < allMapped.length; i++) {
@@ -147,9 +181,13 @@ async function processJob(jobId: string) {
 
     if (!valid) {
       errorCount++
+    } else if (mapped.phone && existingPhones.has(mapped.phone.replace(/\s+/g, ''))) {
+      // Dedup: skip duplicate phone number
+      duplicateCount++
     } else {
+      if (mapped.phone) existingPhones.add(mapped.phone.replace(/\s+/g, ''))
       const buyerName = mapped.buyer?.trim()
-      batch.push({
+      const lead: Record<string, unknown> = {
         org_id: job.org_id,
         first_name: mapped.first_name,
         last_name: mapped.last_name,
@@ -158,8 +196,11 @@ async function processJob(jobId: string) {
         postcode: mapped.postcode,
         product: mapped.product,
         source: SOURCES.includes(mapped.source) ? mapped.source : 'Website',
+        status: isEligible ? 'eligible' : 'new',
         original_buyer_id: (buyerName && buyerIdMap.get(buyerName)) || null,
-      })
+      }
+      if (eligibleDate) lead.created_at = eligibleDate
+      batch.push(lead)
     }
 
     // Insert batch
@@ -187,6 +228,11 @@ async function processJob(jobId: string) {
     }
   }
 
+  // Add duplicate info to errors list
+  if (duplicateCount > 0) {
+    errors.push({ row: 0, field: 'phone', message: `${duplicateCount} duplicate leads skipped (phone number already imported in last 30 days)` })
+  }
+
   // Mark complete
   await supabase.from('import_jobs').update({
     status: errorCount === totalRows ? 'failed' : 'completed',
@@ -200,15 +246,18 @@ async function processJob(jobId: string) {
   await supabase.storage.from('imports').remove([job.storage_path])
 
   // Create notification
+  const parts = [`Imported ${successCount} of ${totalRows} leads from ${job.filename}`]
+  if (duplicateCount > 0) parts.push(`${duplicateCount} duplicates skipped`)
+  if (errorCount > 0) parts.push(`${errorCount} errors`)
   await supabase.from('notifications').insert({
     org_id: job.org_id,
     user_id: job.user_id,
     type: 'import_complete',
     title: 'Import Complete',
-    message: `Imported ${successCount} of ${totalRows} leads from ${job.filename}${errorCount > 0 ? ` (${errorCount} errors)` : ''}.`,
+    message: parts.join('. ') + '.',
   })
 
-  console.log(`Job ${jobId} complete: ${successCount} success, ${errorCount} errors`)
+  console.log(`Job ${jobId} complete: ${successCount} success, ${duplicateCount} dupes, ${errorCount} errors`)
 }
 
 async function poll() {

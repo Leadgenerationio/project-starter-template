@@ -8,6 +8,7 @@ import { FileUploadStep } from '@/components/import/file-upload-step'
 import { ColumnMappingStep } from '@/components/import/column-mapping-step'
 import { ImportProgressStep } from '@/components/import/import-progress-step'
 import type { PreviewResponse, ColumnMapping } from '@/lib/types'
+import type { LeadAge } from '@/components/import/column-mapping-step'
 
 type ImportStep = 'idle' | 'uploading' | 'mapping' | 'importing'
 
@@ -76,7 +77,7 @@ export default function ImportPage() {
     }
   }
 
-  async function handleMappingConfirm(mapping: ColumnMapping) {
+  async function handleMappingConfirm(mapping: ColumnMapping, leadAge: LeadAge) {
     if (!preview) return
 
     abortRef.current?.abort()
@@ -93,6 +94,7 @@ export default function ImportPage() {
           storage_path: preview.storage_path,
           filename: preview.filename,
           column_mapping: mapping,
+          lead_age: leadAge,
         }),
         signal: controller.signal,
       })
