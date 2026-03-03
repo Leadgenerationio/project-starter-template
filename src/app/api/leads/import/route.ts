@@ -1,7 +1,9 @@
+export const maxDuration = 60 // Allow up to 60s for large inline imports
+
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthenticatedOrg } from '@/lib/supabase/auth-helpers'
 import { createClient } from '@/lib/supabase/server'
-import { MAX_IMPORT_FILE_SIZE, INLINE_IMPORT_THRESHOLD } from '@/lib/constants'
+import { MAX_IMPORT_FILE_SIZE, INLINE_IMPORT_THRESHOLD, IMPORT_BATCH_SIZE } from '@/lib/constants'
 import { parseExcelBuffer } from '@/lib/utils/excel-parser'
 import { importRowSchema } from '@/lib/validations/import'
 import type { ImportError } from '@/lib/types'
@@ -107,14 +109,20 @@ async function processInline(
     }
   }
 
-  // Batch insert valid leads
+  // Batch insert valid leads in chunks
   if (validLeads.length > 0) {
-    const { error: insertError } = await supabase
-      .from('leads')
-      .insert(validLeads)
+    for (let i = 0; i < validLeads.length; i += IMPORT_BATCH_SIZE) {
+      const batch = validLeads.slice(i, i + IMPORT_BATCH_SIZE)
+      const { error: insertError } = await supabase
+        .from('leads')
+        .insert(batch)
 
-    if (insertError) {
-      return NextResponse.json({ error: 'Failed to insert leads' }, { status: 500 })
+      if (insertError) {
+        return NextResponse.json(
+          { error: `Failed to insert leads (batch ${Math.floor(i / IMPORT_BATCH_SIZE) + 1}): ${insertError.message}` },
+          { status: 500 }
+        )
+      }
     }
   }
 

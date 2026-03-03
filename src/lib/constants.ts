@@ -64,4 +64,5 @@ export const AGING_THRESHOLDS = {
 } as const
 
 export const MAX_IMPORT_FILE_SIZE = 10 * 1024 * 1024 // 10MB
-export const INLINE_IMPORT_THRESHOLD = 100 // Process files with <=100 rows inline
+export const INLINE_IMPORT_THRESHOLD = 5000 // Process files with <=5000 rows inline (covers Vercel deployments without import-agent)
+export const IMPORT_BATCH_SIZE = 200 // Rows per batch insert to avoid Supabase payload limits
