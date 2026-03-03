@@ -1,5 +1,13 @@
 # Claude Code Rules
 
+## Mandatory: Always Push and Deploy
+
+After every commit, **always** push to git and deploy to Vercel production. Never leave commits local-only. Run:
+```
+git push && npx vercel --prod
+```
+Do not ask whether to push — just do it as part of finishing the work.
+
 ## Mandatory: Keep Documentation In Sync
 
 After completing any new feature, major change, or architectural decision, **always** update these files before declaring done:
