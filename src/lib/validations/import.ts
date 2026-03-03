@@ -1,5 +1,4 @@
 import { z } from 'zod'
-import { PRODUCTS, LEAD_SOURCES } from '@/lib/constants'
 
 export const importRowSchema = z.object({
   first_name: z.string().min(1, 'First name is required'),
@@ -7,8 +6,8 @@ export const importRowSchema = z.object({
   email: z.string().email('Invalid email'),
   phone: z.string().optional().nullable(),
   postcode: z.string().min(2, 'Postcode is required'),
-  product: z.enum(PRODUCTS),
-  source: z.enum(LEAD_SOURCES).optional(),
+  product: z.string().min(1, 'Product is required'),
+  source: z.string().optional(),
 })
 
 export type ImportRow = z.infer<typeof importRowSchema>
