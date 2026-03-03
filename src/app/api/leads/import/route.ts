@@ -133,6 +133,7 @@ async function processInline(
       org_id: orgId,
       user_id: userId,
       filename,
+      storage_path: 'inline',
       status: 'completed',
       total_rows: rows.length,
       processed_rows: rows.length,
