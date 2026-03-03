@@ -90,6 +90,5 @@ export function useLeadCount(params: { buyer_id?: string; product?: string; post
       if (!res.ok) return { count: 0 }
       return res.json()
     },
-    enabled: !!params.buyer_id,
   })
 }

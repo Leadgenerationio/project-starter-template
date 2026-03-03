@@ -185,14 +185,12 @@ export default function SellLeadsPage() {
               />
             </div>
 
-            {buyerId && (
-              <div className="rounded-md bg-muted p-3 text-sm">
-                <strong>{formatNumber(eligibleCount)}</strong> eligible leads match your criteria
-                {eligibleCount > 0 && (
-                  <span> · Estimated total: <strong>{formatCurrency(eligibleCount * parseFloat(pricePerLead || '0'))}</strong></span>
-                )}
-              </div>
-            )}
+            <div className="rounded-md bg-muted p-3 text-sm">
+              <strong>{formatNumber(eligibleCount)}</strong> eligible leads match your criteria
+              {eligibleCount > 0 && buyerId && (
+                <span> · Estimated total: <strong>{formatCurrency(eligibleCount * parseFloat(pricePerLead || '0'))}</strong></span>
+              )}
+            </div>
           </CardContent>
           <CardFooter>
             <Button onClick={handleCreateOrder} disabled={!buyerId || eligibleCount === 0 || createOrder.isPending}>
