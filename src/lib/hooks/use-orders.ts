@@ -67,6 +67,17 @@ export function useConfirmOrder() {
   })
 }
 
+export function usePostcodeAreas() {
+  return useQuery<{ areas: string[] }>({
+    queryKey: ['leads', 'postcode-areas'],
+    queryFn: async () => {
+      const res = await fetch('/api/leads/postcode-areas')
+      if (!res.ok) return { areas: [] }
+      return res.json()
+    },
+  })
+}
+
 export function useLeadCount(params: { buyer_id?: string; product?: string; postcodes?: string }) {
   return useQuery<{ count: number }>({
     queryKey: ['leads', 'count', params],

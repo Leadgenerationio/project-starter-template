@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useBuyers } from '@/lib/hooks/use-buyers'
 import { useDebounce } from '@/lib/hooks/use-debounce'
-import { useCreateOrder, useConfirmOrder, useLeadCount } from '@/lib/hooks/use-orders'
+import { useCreateOrder, useConfirmOrder, useLeadCount, usePostcodeAreas } from '@/lib/hooks/use-orders'
 import { PageHeader } from '@/components/shared/page-header'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -30,18 +30,27 @@ export default function SellLeadsPage() {
   const [step, setStep] = useState<Step>('configure')
   const [buyerId, setBuyerId] = useState('')
   const [product, setProduct] = useState('')
-  const [postcodes, setPostcodes] = useState('')
+  const [selectedAreas, setSelectedAreas] = useState<string[]>([])
   const [pricePerLead, setPricePerLead] = useState('5.00')
   const [order, setOrder] = useState<Order | null>(null)
 
   const activeBuyers = buyers?.filter((b) => b.is_active) ?? []
+  const { data: postcodeAreasData } = usePostcodeAreas()
+  const availableAreas = postcodeAreasData?.areas ?? []
 
-  const debouncedPostcodes = useDebounce(postcodes, 300)
+  const postcodeString = selectedAreas.join(',')
+  const debouncedPostcodes = useDebounce(postcodeString, 300)
   const { data: leadCountData } = useLeadCount({
     buyer_id: buyerId || undefined,
     product: product || undefined,
     postcodes: debouncedPostcodes || undefined,
   })
+
+  function toggleArea(area: string) {
+    setSelectedAreas((prev) =>
+      prev.includes(area) ? prev.filter((a) => a !== area) : [...prev, area]
+    )
+  }
 
   const eligibleCount = leadCountData?.count ?? 0
 
@@ -50,7 +59,7 @@ export default function SellLeadsPage() {
       {
         buyer_id: buyerId,
         product_filter: (product || null) as OrderInput['product_filter'],
-        postcode_filters: postcodes ? postcodes.split(',').map((p) => p.trim()).filter(Boolean) : [],
+        postcode_filters: selectedAreas,
         price_per_lead: parseFloat(pricePerLead),
       },
       {
@@ -131,12 +140,39 @@ export default function SellLeadsPage() {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Postcode Filters (comma-separated, optional)</Label>
-              <Input
-                value={postcodes}
-                onChange={(e) => setPostcodes(e.target.value)}
-                placeholder="SW1, EC1, W1"
-              />
+              <Label>Postcode Areas (optional)</Label>
+              {availableAreas.length > 0 ? (
+                <div className="flex flex-wrap gap-2 p-3 border rounded-md max-h-48 overflow-y-auto">
+                  {availableAreas.map((area) => (
+                    <label
+                      key={area}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-sm cursor-pointer select-none transition-colors ${
+                        selectedAreas.includes(area)
+                          ? 'bg-primary text-primary-foreground border-primary'
+                          : 'bg-background hover:bg-muted border-input'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedAreas.includes(area)}
+                        onChange={() => toggleArea(area)}
+                        className="sr-only"
+                      />
+                      {area}
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">No eligible leads with postcodes found</p>
+              )}
+              {selectedAreas.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Selected: {selectedAreas.join(', ')}
+                  <button type="button" className="ml-2 text-primary underline" onClick={() => setSelectedAreas([])}>
+                    Clear all
+                  </button>
+                </p>
+              )}
             </div>
             <div className="space-y-2">
               <Label>Price Per Lead</Label>
@@ -236,7 +272,7 @@ export default function SellLeadsPage() {
             <Button variant="outline" onClick={() => router.push('/orders/history')}>
               View Order History
             </Button>
-            <Button variant="outline" onClick={() => { setStep('configure'); setOrder(null); setBuyerId(''); setProduct(''); setPostcodes(''); }}>
+            <Button variant="outline" onClick={() => { setStep('configure'); setOrder(null); setBuyerId(''); setProduct(''); setSelectedAreas([]); }}>
               New Order
             </Button>
           </CardFooter>

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthenticatedOrg } from '@/lib/supabase/auth-helpers'
+import { buildPostcodeOrFilter } from '@/lib/utils/postcodes'
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = await getAuthenticatedOrg()
@@ -34,7 +35,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   if (order.product_filter) query = query.eq('product', order.product_filter)
   if (order.postcode_filters && order.postcode_filters.length > 0) {
-    query = query.in('postcode', order.postcode_filters)
+    const orFilter = buildPostcodeOrFilter(order.postcode_filters)
+    if (orFilter) query = query.or(orFilter)
   }
 
   // Exclude leads already sold to this buyer

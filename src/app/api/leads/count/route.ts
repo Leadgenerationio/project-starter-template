@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthenticatedOrg } from '@/lib/supabase/auth-helpers'
+import { buildPostcodeOrFilter } from '@/lib/utils/postcodes'
 
 export async function GET(request: NextRequest) {
   const auth = await getAuthenticatedOrg()
@@ -21,7 +22,8 @@ export async function GET(request: NextRequest) {
 
   if (product) query = query.eq('product', product)
   if (postcodes && postcodes.length > 0) {
-    query = query.in('postcode', postcodes)
+    const orFilter = buildPostcodeOrFilter(postcodes)
+    if (orFilter) query = query.or(orFilter)
   }
 
   // Exclude leads already sold to this buyer or originally from this buyer
