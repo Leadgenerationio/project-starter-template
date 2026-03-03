@@ -6,21 +6,24 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Select } from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@/components/ui/table'
-import { Loader2, ArrowRight, X } from 'lucide-react'
+import { Loader2, ArrowRight, X, Plus } from 'lucide-react'
 import { LEADVAULT_FIELDS, FIXED_VALUE_PREFIX } from '@/lib/utils/excel-parser'
 import { PRODUCTS, LEAD_SOURCES } from '@/lib/constants'
-import type { ColumnMapping, PreviewResponse } from '@/lib/types'
+import type { ColumnMapping, PreviewResponse, Buyer } from '@/lib/types'
 
 interface ColumnMappingStepProps {
   preview: PreviewResponse
-  onConfirm: (mapping: ColumnMapping) => void
+  buyers: Buyer[]
+  onConfirm: (mapping: ColumnMapping, buyerId: string | null) => void
   onCancel: () => void
   importing: boolean
 }
 
 const UNMAPPED = '__unmapped__'
 const FIXED = '__fixed_select__'
+const CREATE_NEW_BUYER = '__create_new__'
 
 /** Fields that have a known set of valid values */
 const FIELD_OPTIONS: Record<string, readonly string[]> = {
@@ -28,7 +31,7 @@ const FIELD_OPTIONS: Record<string, readonly string[]> = {
   source: LEAD_SOURCES,
 }
 
-export function ColumnMappingStep({ preview, onConfirm, onCancel, importing }: ColumnMappingStepProps) {
+export function ColumnMappingStep({ preview, buyers, onConfirm, onCancel, importing }: ColumnMappingStepProps) {
   const [mapping, setMapping] = useState<ColumnMapping>(() => {
     const initial: ColumnMapping = {}
     for (const field of LEADVAULT_FIELDS) {
@@ -36,6 +39,15 @@ export function ColumnMappingStep({ preview, onConfirm, onCancel, importing }: C
     }
     return initial
   })
+
+  // Buyer selection state
+  const [buyerMode, setBuyerMode] = useState<'none' | 'existing' | 'create'>('none')
+  const [selectedBuyerId, setSelectedBuyerId] = useState<string>('')
+  const [newBuyerName, setNewBuyerName] = useState('')
+  const [newBuyerContact, setNewBuyerContact] = useState('')
+  const [newBuyerEmail, setNewBuyerEmail] = useState('')
+  const [creatingBuyer, setCreatingBuyer] = useState(false)
+  const [createdBuyer, setCreatedBuyer] = useState<Buyer | null>(null)
 
   // Track which fields are in "fixed value" mode
   const [fixedMode, setFixedMode] = useState<Record<string, boolean>>({})
@@ -68,7 +80,6 @@ export function ColumnMappingStep({ preview, onConfirm, onCancel, importing }: C
 
   function handleFieldChange(fieldKey: string, selectValue: string) {
     if (selectValue === FIXED) {
-      // Switch to fixed value mode
       setFixedMode((prev) => ({ ...prev, [fieldKey]: true }))
       setMapping((prev) => ({ ...prev, [fieldKey]: '' }))
     } else if (selectValue === UNMAPPED) {
@@ -85,6 +96,53 @@ export function ColumnMappingStep({ preview, onConfirm, onCancel, importing }: C
       ...prev,
       [fieldKey]: value ? `${FIXED_VALUE_PREFIX}${value}` : '',
     }))
+  }
+
+  function handleBuyerSelectChange(value: string) {
+    if (value === CREATE_NEW_BUYER) {
+      setBuyerMode('create')
+      setSelectedBuyerId('')
+    } else if (value === '') {
+      setBuyerMode('none')
+      setSelectedBuyerId('')
+    } else {
+      setBuyerMode('existing')
+      setSelectedBuyerId(value)
+    }
+  }
+
+  async function handleCreateBuyer() {
+    if (!newBuyerName.trim() || !newBuyerContact.trim() || !newBuyerEmail.trim()) return
+    setCreatingBuyer(true)
+    try {
+      const res = await fetch('/api/buyers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          company_name: newBuyerName.trim(),
+          contact_name: newBuyerContact.trim(),
+          email: newBuyerEmail.trim(),
+          is_active: true,
+        }),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error || 'Failed to create buyer')
+      }
+      const buyer = await res.json() as Buyer
+      setCreatedBuyer(buyer)
+      setSelectedBuyerId(buyer.id)
+      setBuyerMode('existing')
+    } catch {
+      // Stay in create mode on failure
+    } finally {
+      setCreatingBuyer(false)
+    }
+  }
+
+  function getEffectiveBuyerId(): string | null {
+    if (buyerMode === 'existing' && selectedBuyerId) return selectedBuyerId
+    return null
   }
 
   // Build preview rows mapped through current mapping
@@ -105,8 +163,85 @@ export function ColumnMappingStep({ preview, onConfirm, onCancel, importing }: C
     })
   }, [preview.sample_rows, mapping])
 
+  // Merge buyers list with any just-created buyer
+  const allBuyers = useMemo(() => {
+    if (createdBuyer && !buyers.find((b) => b.id === createdBuyer.id)) {
+      return [createdBuyer, ...buyers]
+    }
+    return buyers
+  }, [buyers, createdBuyer])
+
   return (
     <div className="space-y-6">
+      {/* Buyer assignment */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Assign Buyer (Optional)</CardTitle>
+          <CardDescription>
+            Assign these leads to a buyer, or create a new one.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Select
+            value={buyerMode === 'create' ? CREATE_NEW_BUYER : selectedBuyerId}
+            onChange={(e) => handleBuyerSelectChange(e.target.value)}
+          >
+            <option value="">No buyer (assign later)</option>
+            <option value={CREATE_NEW_BUYER}>+ Create new buyer</option>
+            {allBuyers.map((buyer) => (
+              <option key={buyer.id} value={buyer.id}>
+                {buyer.company_name} ({buyer.contact_name})
+              </option>
+            ))}
+          </Select>
+
+          {buyerMode === 'create' && (
+            <div className="space-y-3 rounded-md border p-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="buyer-company">Company Name</Label>
+                <Input
+                  id="buyer-company"
+                  value={newBuyerName}
+                  onChange={(e) => setNewBuyerName(e.target.value)}
+                  placeholder="e.g. Acme Solar Ltd"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="buyer-contact">Contact Name</Label>
+                <Input
+                  id="buyer-contact"
+                  value={newBuyerContact}
+                  onChange={(e) => setNewBuyerContact(e.target.value)}
+                  placeholder="e.g. John Smith"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="buyer-email">Email</Label>
+                <Input
+                  id="buyer-email"
+                  type="email"
+                  value={newBuyerEmail}
+                  onChange={(e) => setNewBuyerEmail(e.target.value)}
+                  placeholder="e.g. john@acmesolar.com"
+                />
+              </div>
+              <Button
+                size="sm"
+                onClick={handleCreateBuyer}
+                disabled={creatingBuyer || !newBuyerName.trim() || !newBuyerContact.trim() || !newBuyerEmail.trim()}
+              >
+                {creatingBuyer ? (
+                  <><Loader2 className="h-3 w-3 mr-2 animate-spin" /> Creating...</>
+                ) : (
+                  <><Plus className="h-3 w-3 mr-2" /> Create Buyer</>
+                )}
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Column mapping */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
@@ -204,6 +339,7 @@ export function ColumnMappingStep({ preview, onConfirm, onCancel, importing }: C
         </CardContent>
       </Card>
 
+      {/* Preview */}
       <Card>
         <CardHeader>
           <CardTitle>Preview (first {preview.sample_rows.length} rows)</CardTitle>
@@ -253,7 +389,7 @@ export function ColumnMappingStep({ preview, onConfirm, onCancel, importing }: C
       </Card>
 
       <div className="flex gap-3">
-        <Button onClick={() => onConfirm(mapping)} disabled={!canConfirm || importing}>
+        <Button onClick={() => onConfirm(mapping, getEffectiveBuyerId())} disabled={!canConfirm || importing}>
           {importing ? (
             <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Importing...</>
           ) : (

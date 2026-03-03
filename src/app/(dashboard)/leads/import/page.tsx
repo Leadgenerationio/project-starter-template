@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useImportJob } from '@/lib/hooks/use-import-job'
+import { useBuyers } from '@/lib/hooks/use-buyers'
 import { PageHeader } from '@/components/shared/page-header'
 import { useToast } from '@/components/ui/toast'
 import { FileUploadStep } from '@/components/import/file-upload-step'
@@ -19,6 +20,7 @@ export default function ImportPage() {
   const [jobId, setJobId] = useState<string | null>(null)
 
   const { data: job } = useImportJob(jobId)
+  const { data: buyers = [] } = useBuyers()
   const previewRef = useRef(preview)
   previewRef.current = preview
 
@@ -26,7 +28,6 @@ export default function ImportPage() {
   useEffect(() => {
     return () => {
       abortRef.current?.abort()
-      // Best-effort cleanup of uploaded file if user navigates away during mapping
       const storagePath = previewRef.current?.storage_path
       if (storagePath) {
         fetch('/api/leads/import/preview', {
@@ -77,7 +78,7 @@ export default function ImportPage() {
     }
   }
 
-  async function handleMappingConfirm(mapping: ColumnMapping) {
+  async function handleMappingConfirm(mapping: ColumnMapping, buyerId: string | null) {
     if (!preview) return
 
     abortRef.current?.abort()
@@ -94,6 +95,7 @@ export default function ImportPage() {
           storage_path: preview.storage_path,
           filename: preview.filename,
           column_mapping: mapping,
+          buyer_id: buyerId,
         }),
         signal: controller.signal,
       })
@@ -115,10 +117,8 @@ export default function ImportPage() {
   }
 
   async function handleMappingCancel() {
-    // Abort any in-flight import request
     abortRef.current?.abort()
     abortRef.current = null
-    // Clean up the uploaded file from storage
     if (preview?.storage_path) {
       try {
         await fetch('/api/leads/import/preview', {
@@ -144,7 +144,7 @@ export default function ImportPage() {
     <div>
       <PageHeader title="Import Leads" description="Upload an Excel or CSV file to bulk-import leads" />
 
-      <div className={step === 'mapping' ? 'max-w-3xl space-y-6' : 'max-w-lg space-y-6'}>
+      <div className={step === 'mapping' || step === 'importing' ? 'max-w-3xl space-y-6' : 'max-w-lg space-y-6'}>
         {(step === 'idle' || step === 'uploading') && !jobId && (
           <FileUploadStep
             uploading={step === 'uploading'}
@@ -156,6 +156,7 @@ export default function ImportPage() {
         {(step === 'mapping' || step === 'importing') && preview && !jobId && (
           <ColumnMappingStep
             preview={preview}
+            buyers={buyers}
             onConfirm={handleMappingConfirm}
             onCancel={handleMappingCancel}
             importing={step === 'importing'}

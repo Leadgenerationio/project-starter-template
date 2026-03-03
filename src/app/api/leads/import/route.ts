@@ -43,7 +43,7 @@ async function handleMappedImport(
     return NextResponse.json({ error: issue.message }, { status: 400 })
   }
 
-  const { storage_path, filename, column_mapping } = parsed.data
+  const { storage_path, filename, column_mapping, buyer_id } = parsed.data
 
   // Download file from storage
   const { data: fileData, error: downloadError } = await supabase.storage
@@ -66,7 +66,7 @@ async function handleMappedImport(
   // Small files: process inline
   if (rows.length <= INLINE_IMPORT_THRESHOLD) {
     try {
-      return await processInline(supabase, orgId, userId, filename, rows, column_mapping)
+      return await processInline(supabase, orgId, userId, filename, rows, column_mapping, buyer_id ?? undefined)
     } finally {
       // Always clean up storage file after inline processing, even on failure
       await supabase.storage.from('imports').remove([storage_path])
@@ -179,7 +179,8 @@ async function processInline(
   userId: string,
   filename: string,
   rows: ParsedRow[],
-  columnMapping?: ColumnMapping
+  columnMapping?: ColumnMapping,
+  buyerId?: string
 ) {
   const errors: ImportError[] = []
   const validLeads: Record<string, unknown>[] = []
@@ -200,6 +201,7 @@ async function processInline(
         product: result.data.product,
         source: result.data.source ?? 'Website',
         status: 'new',
+        original_buyer_id: buyerId ?? null,
       })
     }
   }
