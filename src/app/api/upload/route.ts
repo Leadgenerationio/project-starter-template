@@ -1,4 +1,4 @@
-export const maxDuration = 120
+export const maxDuration = 300
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthenticatedOrg } from '@/lib/supabase/auth-helpers'
