@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback, useRef } from 'react'
+import { createClient } from '@/lib/supabase/client'
 import { PageHeader } from '@/components/shared/page-header'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -8,6 +9,8 @@ import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import { PRODUCTS } from '@/lib/constants'
 import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle, Loader2, X } from 'lucide-react'
+
+const MAX_FILE_SIZE = 50 * 1024 * 1024 // 50MB
 
 interface UploadSummary {
   newBuyers: number
@@ -23,6 +26,7 @@ export default function UploadPage() {
   const [file, setFile] = useState<File | null>(null)
   const [product, setProduct] = useState<string>('')
   const [uploading, setUploading] = useState(false)
+  const [status, setStatus] = useState('')
   const [summary, setSummary] = useState<UploadSummary | null>(null)
   const [error, setError] = useState('')
   const [dragOver, setDragOver] = useState(false)
@@ -38,8 +42,8 @@ export default function UploadPage() {
       return
     }
 
-    if (f.size > 10 * 1024 * 1024) {
-      setError('File too large. Maximum size is 10MB.')
+    if (f.size > MAX_FILE_SIZE) {
+      setError('File too large. Maximum size is 50MB.')
       return
     }
 
@@ -74,19 +78,36 @@ export default function UploadPage() {
     setSummary(null)
 
     try {
-      const formData = new FormData()
-      formData.append('file', file)
-      formData.append('product', product)
+      const supabase = createClient()
 
+      // Step 1: Upload file to Supabase Storage (bypasses Vercel body limit)
+      setStatus('Uploading file...')
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+      const storagePath = `uploads/${Date.now()}-${safeName}`
+
+      const { error: uploadError } = await supabase.storage
+        .from('imports')
+        .upload(storagePath, file, { contentType: file.type })
+
+      if (uploadError) {
+        setError(`Failed to upload file: ${uploadError.message}`)
+        return
+      }
+
+      // Step 2: Tell the API to process from storage
+      setStatus('Processing leads, buyers, and sales...')
       const res = await fetch('/api/upload', {
         method: 'POST',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storage_path: storagePath, product }),
       })
 
       const data = await res.json()
 
       if (!res.ok) {
-        setError(data.error || 'Upload failed')
+        setError(data.error || 'Processing failed')
+        // Clean up storage on failure
+        await supabase.storage.from('imports').remove([storagePath])
         return
       }
 
@@ -95,6 +116,7 @@ export default function UploadPage() {
       setError('Upload failed. Please try again.')
     } finally {
       setUploading(false)
+      setStatus('')
     }
   }
 
@@ -103,6 +125,7 @@ export default function UploadPage() {
     setProduct('')
     setSummary(null)
     setError('')
+    setStatus('')
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
@@ -133,7 +156,7 @@ export default function UploadPage() {
               >
                 <Upload className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
                 <p className="text-sm font-medium">Drag & drop your file here, or click to browse</p>
-                <p className="text-xs text-muted-foreground mt-1">Supports .xlsx, .xls, .csv (max 10MB)</p>
+                <p className="text-xs text-muted-foreground mt-1">Supports .xlsx, .xls, .csv (max 50MB)</p>
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -152,7 +175,9 @@ export default function UploadPage() {
                   <div>
                     <p className="text-sm font-medium">{file.name}</p>
                     <p className="text-xs text-muted-foreground">
-                      {(file.size / 1024).toFixed(1)} KB
+                      {file.size < 1024 * 1024
+                        ? `${(file.size / 1024).toFixed(1)} KB`
+                        : `${(file.size / (1024 * 1024)).toFixed(1)} MB`}
                     </p>
                   </div>
                 </div>
@@ -188,7 +213,7 @@ export default function UploadPage() {
               {uploading ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Processing...
+                  {status || 'Processing...'}
                 </>
               ) : (
                 <>

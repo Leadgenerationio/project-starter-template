@@ -1,8 +1,7 @@
-export const maxDuration = 60
+export const maxDuration = 120
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthenticatedOrg } from '@/lib/supabase/auth-helpers'
-import { MAX_IMPORT_FILE_SIZE } from '@/lib/constants'
 import * as XLSX from 'xlsx'
 
 /** Column header aliases (lowercased) → canonical key */
@@ -85,18 +84,15 @@ function normalizeBuyerName(name: string): string {
 function isMeaningfulBuyer(val: string): boolean {
   if (!val) return false
   const lower = val.toLowerCase()
-  // Skip values that are clearly not buyer names
   return lower !== '0' && lower !== 'n/a' && lower !== 'none' && lower !== 'null' && lower !== ''
 }
 
 function parseDate(val: unknown): string | null {
   if (!val) return null
-  // XLSX may return a JS Date object or a serial date number
   if (val instanceof Date) {
     return val.toISOString().split('T')[0]
   }
   if (typeof val === 'number') {
-    // Excel serial date
     const date = XLSX.SSF.parse_date_code(val)
     if (date) {
       const y = date.y
@@ -107,7 +103,6 @@ function parseDate(val: unknown): string | null {
   }
   const str = String(val).trim()
   if (!str) return null
-  // Try parsing common date formats
   const parsed = new Date(str)
   if (!isNaN(parsed.getTime())) {
     return parsed.toISOString().split('T')[0]
@@ -121,29 +116,31 @@ export async function POST(request: NextRequest) {
 
   const { supabase, orgId } = auth
 
-  const formData = await request.formData()
-  const file = formData.get('file') as File
-  const product = formData.get('product') as string
+  // Accept JSON body with storage_path (file already uploaded to Supabase Storage by client)
+  const body = await request.json()
+  const { storage_path, product } = body
 
-  if (!file) {
-    return NextResponse.json({ error: 'No file uploaded' }, { status: 400 })
+  if (!storage_path || typeof storage_path !== 'string') {
+    return NextResponse.json({ error: 'storage_path is required' }, { status: 400 })
   }
 
-  if (file.size > MAX_IMPORT_FILE_SIZE) {
-    return NextResponse.json({ error: 'File too large (max 10MB)' }, { status: 400 })
-  }
-
-  const ext = file.name.split('.').pop()?.toLowerCase()
-  if (!['xlsx', 'xls', 'csv'].includes(ext || '')) {
-    return NextResponse.json({ error: 'Invalid file type. Supported: .xlsx, .xls, .csv' }, { status: 400 })
-  }
-
-  if (!product) {
+  if (!product || typeof product !== 'string') {
     return NextResponse.json({ error: 'Product is required' }, { status: 400 })
   }
 
+  // Download file from Supabase Storage
+  const { data: fileData, error: downloadError } = await supabase.storage
+    .from('imports')
+    .download(storage_path)
+
+  if (downloadError || !fileData) {
+    console.error('Failed to download file:', downloadError?.message)
+    return NextResponse.json({ error: 'Failed to download file from storage' }, { status: 500 })
+  }
+
+  const buffer = await fileData.arrayBuffer()
+
   // Parse file
-  const buffer = await file.arrayBuffer()
   let rows: ParsedRow[]
   try {
     const workbook = XLSX.read(buffer, { type: 'array', cellDates: true })
@@ -151,6 +148,7 @@ export async function POST(request: NextRequest) {
     const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' })
 
     if (rawRows.length === 0) {
+      await supabase.storage.from('imports').remove([storage_path])
       return NextResponse.json({ error: 'File contains no data rows' }, { status: 400 })
     }
 
@@ -169,6 +167,7 @@ export async function POST(request: NextRequest) {
     const requiredFields = ['first_name', 'last_name', 'postcode']
     const missing = requiredFields.filter((f) => !mappedFields.has(f))
     if (missing.length > 0) {
+      await supabase.storage.from('imports').remove([storage_path])
       return NextResponse.json(
         { error: `Missing required columns: ${missing.join(', ')}. Check your file headers.` },
         { status: 400 }
@@ -199,11 +198,12 @@ export async function POST(request: NextRequest) {
       }
     })
   } catch {
+    await supabase.storage.from('imports').remove([storage_path])
     return NextResponse.json({ error: 'Failed to parse file' }, { status: 400 })
   }
 
   // ===== Step 2: Extract and deduplicate buyers =====
-  const buyerNamesSet = new Map<string, string>() // normalized_lower → display_name
+  const buyerNamesSet = new Map<string, string>()
   for (const row of rows) {
     const buyerColumns = [row.buyer, row.sold_1, row.sold_2, row.sold_3, row.sold_4]
     for (const val of buyerColumns) {
@@ -217,14 +217,12 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Check which buyers already exist in the org
   const allBuyerNames = Array.from(buyerNamesSet.values())
   let existingBuyersCount = 0
   let newBuyersCount = 0
-  const buyerIdMap = new Map<string, string>() // lower_name → buyer_id
+  const buyerIdMap = new Map<string, string>()
 
   if (allBuyerNames.length > 0) {
-    // Fetch all existing buyers for this org
     const { data: existingBuyers } = await supabase
       .from('buyers')
       .select('id, company_name')
@@ -236,11 +234,9 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Find which buyer names are new
     const newNames = allBuyerNames.filter((name) => !buyerIdMap.has(name.toLowerCase()))
     existingBuyersCount = allBuyerNames.length - newNames.length
 
-    // Create new buyers in batches
     if (newNames.length > 0) {
       const newBuyerRecords = newNames.map((name) => ({
         org_id: orgId,
@@ -274,9 +270,8 @@ export async function POST(request: NextRequest) {
   }
 
   // ===== Step 3: Import leads (dedup on email or phone) =====
-  // Load existing leads for dedup
-  const existingLeadsByEmail = new Map<string, string>() // email → lead_id
-  const existingLeadsByPhone = new Map<string, string>() // phone → lead_id
+  const existingLeadsByEmail = new Map<string, string>()
+  const existingLeadsByPhone = new Map<string, string>()
 
   const { data: existingLeads } = await supabase
     .from('leads')
@@ -295,12 +290,10 @@ export async function POST(request: NextRequest) {
   let salesRecorded = 0
   let duplicateSalesSkipped = 0
 
-  // Also track leads we insert in this batch to avoid batch-internal duplicates
-  const batchEmails = new Map<string, string>() // email → pending lead index
-  const batchPhones = new Map<string, string>() // phone → pending lead index
+  const batchEmails = new Map<string, string>()
+  const batchPhones = new Map<string, string>()
 
-  // Load existing lead_sales to check for duplicates
-  const existingSalesSet = new Set<string>() // "lead_id:buyer_id"
+  const existingSalesSet = new Set<string>()
   const { data: existingSales } = await supabase
     .from('lead_sales')
     .select('lead_id, buyer_id')
@@ -312,15 +305,13 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Process rows: separate into inserts and updates
   const leadsToInsert: Record<string, unknown>[] = []
   const leadsToUpdate: { id: string; data: Record<string, unknown> }[] = []
-  // Track which sales to create per lead (keyed by temp index or lead_id)
-  const pendingSalesByIndex: Map<number, string[]> = new Map() // insert_index → buyer_ids
-  const pendingSalesByLeadId: Map<string, string[]> = new Map() // lead_id → buyer_ids
+  const pendingSalesByIndex: Map<number, string[]> = new Map()
+  const pendingSalesByLeadId: Map<string, string[]> = new Map()
 
   for (const row of rows) {
-    if (!row.first_name && !row.last_name) continue // skip empty rows
+    if (!row.first_name && !row.last_name) continue
 
     const email = row.email?.toLowerCase() || null
     const phone = row.telephone?.replace(/\s+/g, '') || null
@@ -328,7 +319,6 @@ export async function POST(request: NextRequest) {
       ? buyerIdMap.get(normalizeBuyerName(row.buyer).toLowerCase()) ?? null
       : null
 
-    // Check if lead exists
     let existingLeadId: string | null = null
     if (email && existingLeadsByEmail.has(email)) {
       existingLeadId = existingLeadsByEmail.get(email)!
@@ -336,15 +326,13 @@ export async function POST(request: NextRequest) {
       existingLeadId = existingLeadsByPhone.get(phone)!
     }
 
-    // Also check within this batch
     if (!existingLeadId && email && batchEmails.has(email)) {
-      existingLeadId = batchEmails.get(email)! // will be resolved after insert
+      existingLeadId = batchEmails.get(email)!
     }
     if (!existingLeadId && phone && batchPhones.has(phone)) {
       existingLeadId = batchPhones.get(phone)!
     }
 
-    // Collect sold buyer IDs for this row
     const soldBuyerIds: string[] = []
     for (const soldName of [row.sold_1, row.sold_2, row.sold_3, row.sold_4]) {
       if (soldName && isMeaningfulBuyer(soldName)) {
@@ -369,17 +357,14 @@ export async function POST(request: NextRequest) {
     }
 
     if (existingLeadId) {
-      // Update existing lead
       leadsToUpdate.push({ id: existingLeadId, data: leadData })
       if (soldBuyerIds.length > 0) {
         pendingSalesByLeadId.set(existingLeadId, soldBuyerIds)
       }
     } else {
-      // Insert new lead
       const insertIndex = leadsToInsert.length
       leadsToInsert.push({ ...leadData, org_id: orgId, status: row.ever_sold ? 'resold' : 'new' })
 
-      // Track for intra-batch dedup
       if (email) batchEmails.set(email, `__pending_${insertIndex}`)
       if (phone) batchPhones.set(phone, `__pending_${insertIndex}`)
 
@@ -426,7 +411,6 @@ export async function POST(request: NextRequest) {
   // ===== Step 4: Record sales =====
   const salesToInsert: Record<string, unknown>[] = []
 
-  // Sales for newly inserted leads
   for (const [insertIndex, buyerIds] of pendingSalesByIndex) {
     const leadId = insertedLeadIds[insertIndex]
     if (!leadId) continue
@@ -448,7 +432,6 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Sales for updated leads
   for (const [leadId, buyerIds] of pendingSalesByLeadId) {
     for (const buyerId of buyerIds) {
       const key = `${leadId}:${buyerId}`
@@ -468,7 +451,6 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Batch insert sales
   for (let i = 0; i < salesToInsert.length; i += LEAD_BATCH_SIZE) {
     const batch = salesToInsert.slice(i, i + LEAD_BATCH_SIZE)
     const { error: salesError } = await supabase
@@ -477,11 +459,13 @@ export async function POST(request: NextRequest) {
 
     if (salesError) {
       console.error('Failed to insert sales:', salesError.message)
-      // Don't fail the whole upload for sales errors — leads are already imported
     } else {
       salesRecorded += batch.length
     }
   }
+
+  // Clean up storage file
+  await supabase.storage.from('imports').remove([storage_path])
 
   // ===== Step 5: Return summary =====
   return NextResponse.json({
