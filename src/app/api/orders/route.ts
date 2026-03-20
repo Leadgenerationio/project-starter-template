@@ -63,7 +63,8 @@ export async function POST(request: NextRequest) {
     .single()
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    console.error('Failed to create order:', error.message)
+    return NextResponse.json({ error: 'Failed to create order' }, { status: 500 })
   }
 
   return NextResponse.json(order, { status: 201 })

@@ -46,7 +46,8 @@ export async function GET(request: NextRequest) {
   const { count, error } = await query
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    console.error('Failed to count leads:', error.message)
+    return NextResponse.json({ error: 'Failed to count leads' }, { status: 500 })
   }
 
   return NextResponse.json({ count: count ?? 0 })

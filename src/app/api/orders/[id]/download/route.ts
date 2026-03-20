@@ -50,10 +50,15 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   })
 
   const escape = (val: string) => {
-    if (val.includes(',') || val.includes('"') || val.includes('\n')) {
-      return `"${val.replace(/"/g, '""')}"`
+    // Prevent CSV formula injection: prefix dangerous starting characters with a single quote
+    let safe = val
+    if (/^[=+\-@\t\r]/.test(safe)) {
+      safe = `'${safe}`
     }
-    return val
+    if (safe.includes(',') || safe.includes('"') || safe.includes('\n') || safe.includes("'")) {
+      return `"${safe.replace(/"/g, '""')}"`
+    }
+    return safe
   }
 
   const csv = [

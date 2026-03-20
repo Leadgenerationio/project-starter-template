@@ -142,7 +142,9 @@ async function handleFormDataImport(
   }
 
   // Large files: upload to storage and create a pending job for the background agent
-  const storagePath = `${orgId}/${Date.now()}-${file.name}`
+  // Sanitize filename to prevent path traversal
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+  const storagePath = `${orgId}/${Date.now()}-${safeName}`
 
   const { error: uploadError } = await supabase.storage
     .from('imports')

@@ -31,6 +31,8 @@ export function buildPostcodeOrFilter(areas: string[]): string {
   for (const area of areas) {
     const upper = area.toUpperCase().trim()
     if (!upper) continue
+    // Only allow alphabetic area codes to prevent filter injection
+    if (!/^[A-Z]{1,2}$/.test(upper)) continue
     if (SINGLE_LETTER_AREAS.has(upper) && upper.length === 1) {
       for (let d = 0; d <= 9; d++) {
         parts.push(`postcode.ilike.${upper}${d}%`)

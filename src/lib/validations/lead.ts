@@ -14,14 +14,25 @@ export const leadSchema = z.object({
 
 export const leadUpdateSchema = leadSchema.partial()
 
+const ALLOWED_SORT_COLUMNS = [
+  'created_at',
+  'first_name',
+  'last_name',
+  'email',
+  'postcode',
+  'product',
+  'source',
+  'status',
+] as const
+
 export const leadFilterSchema = z.object({
   status: z.string().optional(),
   product: z.string().optional(),
   source: z.string().optional(),
-  search: z.string().optional(),
+  search: z.string().max(200).optional(),
   page: z.coerce.number().min(1).default(1),
   pageSize: z.coerce.number().min(1).max(100).default(20),
-  sortBy: z.string().default('created_at'),
+  sortBy: z.enum(ALLOWED_SORT_COLUMNS).default('created_at'),
   sortOrder: z.enum(['asc', 'desc']).default('desc'),
 })
 

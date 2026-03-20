@@ -19,7 +19,9 @@ export async function GET(request: NextRequest) {
   if (filters.product) query = query.eq('product', filters.product)
   if (filters.source) query = query.eq('source', filters.source)
   if (filters.search) {
-    query = query.or(`first_name.ilike.%${filters.search}%,last_name.ilike.%${filters.search}%,email.ilike.%${filters.search}%,postcode.ilike.%${filters.search}%`)
+    // Escape special PostgREST characters to prevent filter injection
+    const s = filters.search.replace(/[%_\\,().]/g, (c) => `\\${c}`)
+    query = query.or(`first_name.ilike.%${s}%,last_name.ilike.%${s}%,email.ilike.%${s}%,postcode.ilike.%${s}%`)
   }
 
   const from = (filters.page - 1) * filters.pageSize
@@ -32,7 +34,8 @@ export async function GET(request: NextRequest) {
   const { data, error, count } = await query
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    console.error('Failed to fetch leads:', error.message)
+    return NextResponse.json({ error: 'Failed to fetch leads' }, { status: 500 })
   }
 
   return NextResponse.json({
@@ -63,7 +66,8 @@ export async function POST(request: NextRequest) {
     .single()
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    console.error('Failed to create lead:', error.message)
+    return NextResponse.json({ error: 'Failed to create lead' }, { status: 500 })
   }
 
   return NextResponse.json(data, { status: 201 })

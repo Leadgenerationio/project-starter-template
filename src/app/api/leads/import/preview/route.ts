@@ -39,8 +39,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'File contains no data rows' }, { status: 400 })
   }
 
-  // Upload to storage for later processing
-  const storagePath = `${orgId}/${Date.now()}-${file.name}`
+  // Sanitize filename to prevent path traversal and upload to storage
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+  const storagePath = `${orgId}/${Date.now()}-${safeName}`
   const { error: uploadError } = await supabase.storage
     .from('imports')
     .upload(storagePath, buffer, { contentType: file.type })

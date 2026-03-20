@@ -60,7 +60,8 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     .eq('org_id', orgId)
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    console.error('Failed to delete order:', error.message)
+    return NextResponse.json({ error: 'Failed to delete order' }, { status: 500 })
   }
 
   return NextResponse.json({ success: true })

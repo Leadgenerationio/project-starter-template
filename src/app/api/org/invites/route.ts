@@ -15,7 +15,8 @@ export async function GET() {
     .order('created_at', { ascending: false })
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    console.error('Failed to fetch invites:', error.message)
+    return NextResponse.json({ error: 'Failed to fetch invites' }, { status: 500 })
   }
 
   return NextResponse.json(data ?? [])
@@ -71,7 +72,8 @@ export async function POST(request: NextRequest) {
     .single()
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    console.error('Failed to create invite:', error.message)
+    return NextResponse.json({ error: 'Failed to create invite' }, { status: 500 })
   }
 
   return NextResponse.json(data, { status: 201 })
@@ -91,7 +93,8 @@ export async function DELETE(request: NextRequest) {
     .eq('org_id', orgId)
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    console.error('Failed to delete invite:', error.message)
+    return NextResponse.json({ error: 'Failed to delete invite' }, { status: 500 })
   }
 
   return NextResponse.json({ success: true })

@@ -39,8 +39,9 @@ export async function updateSession(request: NextRequest) {
   const publicRoutes = ['/login', '/register', '/forgot-password', '/api/health', '/api/auth']
   const isPublicRoute = publicRoutes.some((route) => pathname.startsWith(route))
   const isInviteRoute = pathname.startsWith('/invite/')
+  const isMfaRoute = pathname === '/mfa-verify'
 
-  if (!user && !isPublicRoute && !isInviteRoute) {
+  if (!user && !isPublicRoute && !isInviteRoute && !isMfaRoute) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)
@@ -50,6 +51,16 @@ export async function updateSession(request: NextRequest) {
     const url = request.nextUrl.clone()
     url.pathname = '/dashboard'
     return NextResponse.redirect(url)
+  }
+
+  // Enforce MFA: if user has TOTP factors enrolled but session is only AAL1, redirect to /mfa-verify
+  if (user && !isPublicRoute && !isMfaRoute) {
+    const { data: aalData } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
+    if (aalData && aalData.nextLevel === 'aal2' && aalData.currentLevel === 'aal1') {
+      const url = request.nextUrl.clone()
+      url.pathname = '/mfa-verify'
+      return NextResponse.redirect(url)
+    }
   }
 
   return supabaseResponse

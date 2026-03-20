@@ -17,7 +17,8 @@ export async function GET() {
     .order('created_at', { ascending: false })
 
   if (buyersError) {
-    return NextResponse.json({ error: buyersError.message }, { status: 500 })
+    console.error('Failed to fetch buyers:', buyersError.message)
+    return NextResponse.json({ error: 'Failed to fetch buyers' }, { status: 500 })
   }
 
   if (!buyers || buyers.length === 0) {
@@ -72,7 +73,8 @@ export async function POST(request: NextRequest) {
     .single()
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    console.error('Failed to create buyer:', error.message)
+    return NextResponse.json({ error: 'Failed to create buyer' }, { status: 500 })
   }
 
   return NextResponse.json(data, { status: 201 })

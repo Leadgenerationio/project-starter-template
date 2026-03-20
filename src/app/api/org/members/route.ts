@@ -16,7 +16,8 @@ export async function GET() {
     .order('created_at', { ascending: true })
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    console.error('Failed to fetch members:', error.message)
+    return NextResponse.json({ error: 'Failed to fetch members' }, { status: 500 })
   }
 
   // Enrich with email from auth
@@ -50,7 +51,8 @@ export async function DELETE(request: NextRequest) {
     .neq('role', 'owner') // Can't remove owner
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    console.error('Failed to remove member:', error.message)
+    return NextResponse.json({ error: 'Failed to remove member' }, { status: 500 })
   }
 
   return NextResponse.json({ success: true })

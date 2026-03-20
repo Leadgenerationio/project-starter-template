@@ -24,7 +24,7 @@ export default function LeadsPage() {
     source: '',
     page: 1,
     pageSize: 20,
-    sortBy: 'created_at',
+    sortBy: 'created_at' as const,
     sortOrder: 'desc' as const,
   })
 
