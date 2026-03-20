@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Users, UserCheck, ShoppingCart, Settings, Upload, History } from 'lucide-react'
+import { LayoutDashboard, Users, UserCheck, ShoppingCart, Settings, Upload, History, FileUp } from 'lucide-react'
 import { cn } from '@/lib/utils/cn'
 
 const navigation = [
@@ -12,6 +12,7 @@ const navigation = [
   { name: 'Sell Leads', href: '/orders', icon: ShoppingCart },
   { name: 'Order History', href: '/orders/history', icon: History },
   { name: 'Import', href: '/leads/import', icon: Upload },
+  { name: 'Upload Leads', href: '/upload', icon: FileUp },
   { name: 'Settings', href: '/settings', icon: Settings },
 ]
 
