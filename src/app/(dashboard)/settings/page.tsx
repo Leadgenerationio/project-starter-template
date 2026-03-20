@@ -13,6 +13,7 @@ import type { Notification } from '@/lib/types'
 import { formatDateTime } from '@/lib/utils/format'
 import { Bell, Check } from 'lucide-react'
 import Link from 'next/link'
+import { MfaEnrollment } from '@/components/settings/mfa-enrollment'
 
 export default function SettingsPage() {
   const { org } = useOrg()
@@ -94,6 +95,8 @@ export default function SettingsPage() {
             </div>
           </CardContent>
         </Card>
+
+        <MfaEnrollment />
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">

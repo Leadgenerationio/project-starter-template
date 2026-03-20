@@ -34,11 +34,21 @@ export default function LoginPage() {
     }
 
     const supabase = createClient()
-    const { error: authError } = await supabase.auth.signInWithPassword(input)
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword(input)
 
     if (authError) {
       setError(authError.message)
       setLoading(false)
+      return
+    }
+
+    // Check if user has MFA enrolled — if so, redirect to verification page
+    const { data: factors } = await supabase.auth.mfa.listFactors()
+    const hasTOTP = factors?.totp && factors.totp.length > 0
+
+    if (hasTOTP) {
+      router.push('/mfa-verify')
+      router.refresh()
       return
     }
 
