@@ -74,17 +74,20 @@ export default function UploadPage() {
 
     try {
       // Step 1: Parse file in the browser
-      setStatus('Reading file...')
+      setStatus('Reading file (this may take a moment for large files)...')
       const buffer = await file.arrayBuffer()
       const workbook = XLSX.read(buffer, { type: 'array', cellDates: true })
       const sheet = workbook.Sheets[workbook.SheetNames[0]]
       const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' })
 
       if (rows.length === 0) {
-        setError('File contains no data rows')
+        const ref = sheet['!ref'] || 'empty'
+        setError(`File contains no data rows. Sheet "${workbook.SheetNames[0]}" range: ${ref}`)
         setUploading(false)
         return
       }
+
+      setStatus(`Found ${rows.length.toLocaleString()} rows. Processing...`)
 
       // Step 2: Send rows to API in batches
       const totalBatches = Math.ceil(rows.length / BATCH_SIZE)
