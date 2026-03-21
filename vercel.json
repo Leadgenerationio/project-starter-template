@@ -1,12 +1,12 @@
 {
   "functions": {
     "src/app/api/upload/route.ts": {
-      "memory": 3009,
-      "maxDuration": 300
+      "memory": 2048,
+      "maxDuration": 60
     },
     "src/app/api/upload/preview/route.ts": {
-      "memory": 3009,
-      "maxDuration": 120
+      "memory": 2048,
+      "maxDuration": 60
     }
   }
 }
