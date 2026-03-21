@@ -10,7 +10,7 @@ import { Select } from '@/components/ui/select'
 import { PRODUCTS } from '@/lib/constants'
 import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle, Loader2, X } from 'lucide-react'
 
-const MAX_FILE_SIZE = 1024 * 1024 * 1024 // 1GB
+const MAX_FILE_SIZE = 50 * 1024 * 1024 // 50MB
 
 interface UploadSummary {
   newBuyers: number
@@ -43,7 +43,7 @@ export default function UploadPage() {
     }
 
     if (f.size > MAX_FILE_SIZE) {
-      setError('File too large. Maximum size is 1GB.')
+      setError('File too large. Maximum size is 50MB.')
       return
     }
 
@@ -156,7 +156,7 @@ export default function UploadPage() {
               >
                 <Upload className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
                 <p className="text-sm font-medium">Drag & drop your file here, or click to browse</p>
-                <p className="text-xs text-muted-foreground mt-1">Supports .xlsx, .xls, .csv (max 1GB)</p>
+                <p className="text-xs text-muted-foreground mt-1">Supports .xlsx, .xls, .csv (max 50MB)</p>
                 <input
                   ref={fileInputRef}
                   type="file"
