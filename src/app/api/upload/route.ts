@@ -2,7 +2,6 @@ export const maxDuration = 300
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthenticatedOrg } from '@/lib/supabase/auth-helpers'
-import * as XLSX from 'xlsx'
 
 /** Column header aliases (lowercased) → canonical key */
 const HEADER_MAP: Record<string, string> = {
@@ -89,18 +88,6 @@ function isMeaningfulBuyer(val: string): boolean {
 
 function parseDate(val: unknown): string | null {
   if (!val) return null
-  if (val instanceof Date) {
-    return val.toISOString().split('T')[0]
-  }
-  if (typeof val === 'number') {
-    const date = XLSX.SSF.parse_date_code(val)
-    if (date) {
-      const y = date.y
-      const m = String(date.m).padStart(2, '0')
-      const d = String(date.d).padStart(2, '0')
-      return `${y}-${m}-${d}`
-    }
-  }
   const str = String(val).trim()
   if (!str) return null
   const parsed = new Date(str)
@@ -116,43 +103,21 @@ export async function POST(request: NextRequest) {
 
   const { supabase, orgId } = auth
 
-  // Accept JSON body with storage_path (file already uploaded to Supabase Storage by client)
+  // Accept JSON with pre-parsed rows from client-side xlsx
   const body = await request.json()
-  const { storage_path, product } = body
+  const { rows: rawRows, product } = body
 
-  if (!storage_path || typeof storage_path !== 'string') {
-    return NextResponse.json({ error: 'storage_path is required' }, { status: 400 })
+  if (!rawRows || !Array.isArray(rawRows) || rawRows.length === 0) {
+    return NextResponse.json({ error: 'No data rows provided' }, { status: 400 })
   }
 
   if (!product || typeof product !== 'string') {
     return NextResponse.json({ error: 'Product is required' }, { status: 400 })
   }
 
-  // Download file from Supabase Storage
-  const { data: fileData, error: downloadError } = await supabase.storage
-    .from('imports')
-    .download(storage_path)
-
-  if (downloadError || !fileData) {
-    console.error('Failed to download file:', downloadError?.message)
-    return NextResponse.json({ error: 'Failed to download file from storage' }, { status: 500 })
-  }
-
-  const buffer = await fileData.arrayBuffer()
-
-  // Parse file
+  // Map headers from the raw row objects
   let rows: ParsedRow[]
   try {
-    const workbook = XLSX.read(buffer, { type: 'array', cellDates: true })
-    const sheet = workbook.Sheets[workbook.SheetNames[0]]
-    const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' })
-
-    if (rawRows.length === 0) {
-      await supabase.storage.from('imports').remove([storage_path])
-      return NextResponse.json({ error: 'File contains no data rows' }, { status: 400 })
-    }
-
-    // Map headers
     const sampleHeaders = Object.keys(rawRows[0])
     const headerMapping: Record<string, string> = {}
     for (const h of sampleHeaders) {
@@ -162,19 +127,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Validate required columns exist
-    const mappedFields = new Set(Object.values(headerMapping))
-    const requiredFields = ['first_name', 'last_name', 'postcode']
-    const missing = requiredFields.filter((f) => !mappedFields.has(f))
-    if (missing.length > 0) {
-      await supabase.storage.from('imports').remove([storage_path])
-      return NextResponse.json(
-        { error: `Missing required columns: ${missing.join(', ')}. Check your file headers.` },
-        { status: 400 }
-      )
-    }
-
-    rows = rawRows.map((raw) => {
+    rows = rawRows.map((raw: Record<string, unknown>) => {
       const mapped: Record<string, unknown> = {}
       for (const [origHeader, canonicalKey] of Object.entries(headerMapping)) {
         mapped[canonicalKey] = raw[origHeader]
@@ -198,8 +151,7 @@ export async function POST(request: NextRequest) {
       }
     })
   } catch {
-    await supabase.storage.from('imports').remove([storage_path])
-    return NextResponse.json({ error: 'Failed to parse file' }, { status: 400 })
+    return NextResponse.json({ error: 'Failed to parse row data' }, { status: 400 })
   }
 
   // ===== Step 2: Extract and deduplicate buyers =====
@@ -464,10 +416,6 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Clean up storage file
-  await supabase.storage.from('imports').remove([storage_path])
-
-  // ===== Step 5: Return summary =====
   return NextResponse.json({
     newBuyers: newBuyersCount,
     existingBuyers: existingBuyersCount,

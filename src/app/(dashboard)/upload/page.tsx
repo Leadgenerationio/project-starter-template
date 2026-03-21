@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useCallback, useRef } from 'react'
-import { createClient } from '@/lib/supabase/client'
 import { PageHeader } from '@/components/shared/page-header'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -9,8 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import { PRODUCTS } from '@/lib/constants'
 import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle, Loader2, X } from 'lucide-react'
-
-const MAX_FILE_SIZE = 50 * 1024 * 1024 // 50MB
+import * as XLSX from 'xlsx'
 
 interface UploadSummary {
   newBuyers: number
@@ -21,6 +19,8 @@ interface UploadSummary {
   duplicateSalesSkipped: number
   totalRows: number
 }
+
+const BATCH_SIZE = 2000
 
 export default function UploadPage() {
   const [file, setFile] = useState<File | null>(null)
@@ -39,11 +39,6 @@ export default function UploadPage() {
     const ext = f.name.split('.').pop()?.toLowerCase()
     if (!['xlsx', 'xls', 'csv'].includes(ext || '')) {
       setError('Invalid file type. Please upload an .xlsx, .xls, or .csv file.')
-      return
-    }
-
-    if (f.size > MAX_FILE_SIZE) {
-      setError('File too large. Maximum size is 50MB.')
       return
     }
 
@@ -78,42 +73,62 @@ export default function UploadPage() {
     setSummary(null)
 
     try {
-      const supabase = createClient()
+      // Step 1: Parse file in the browser
+      setStatus('Reading file...')
+      const buffer = await file.arrayBuffer()
+      const workbook = XLSX.read(buffer, { type: 'array', cellDates: true })
+      const sheet = workbook.Sheets[workbook.SheetNames[0]]
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' })
 
-      // Step 1: Upload file to Supabase Storage (bypasses Vercel body limit)
-      setStatus('Uploading file...')
-      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
-      const storagePath = `uploads/${Date.now()}-${safeName}`
-
-      const { error: uploadError } = await supabase.storage
-        .from('imports')
-        .upload(storagePath, file, { contentType: file.type })
-
-      if (uploadError) {
-        setError(`Failed to upload file: ${uploadError.message}`)
+      if (rows.length === 0) {
+        setError('File contains no data rows')
+        setUploading(false)
         return
       }
 
-      // Step 2: Tell the API to process from storage
-      setStatus('Processing leads, buyers, and sales...')
-      const res = await fetch('/api/upload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ storage_path: storagePath, product }),
-      })
-
-      const data = await res.json()
-
-      if (!res.ok) {
-        setError(data.error || 'Processing failed')
-        // Clean up storage on failure
-        await supabase.storage.from('imports').remove([storagePath])
-        return
+      // Step 2: Send rows to API in batches
+      const totalBatches = Math.ceil(rows.length / BATCH_SIZE)
+      const totals: UploadSummary = {
+        newBuyers: 0,
+        existingBuyers: 0,
+        leadsImported: 0,
+        leadsUpdated: 0,
+        salesRecorded: 0,
+        duplicateSalesSkipped: 0,
+        totalRows: rows.length,
       }
 
-      setSummary(data)
-    } catch {
-      setError('Upload failed. Please try again.')
+      for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+        const batchNum = Math.floor(i / BATCH_SIZE) + 1
+        setStatus(`Processing batch ${batchNum} of ${totalBatches} (${rows.length.toLocaleString()} rows)...`)
+
+        const batch = rows.slice(i, i + BATCH_SIZE)
+
+        const res = await fetch('/api/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rows: batch, product }),
+        })
+
+        const data = await res.json()
+
+        if (!res.ok) {
+          setError(data.error || `Processing failed on batch ${batchNum}`)
+          setUploading(false)
+          return
+        }
+
+        totals.newBuyers += data.newBuyers
+        totals.existingBuyers += data.existingBuyers
+        totals.leadsImported += data.leadsImported
+        totals.leadsUpdated += data.leadsUpdated
+        totals.salesRecorded += data.salesRecorded
+        totals.duplicateSalesSkipped += data.duplicateSalesSkipped
+      }
+
+      setSummary(totals)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed. Please try again.')
     } finally {
       setUploading(false)
       setStatus('')
@@ -134,7 +149,6 @@ export default function UploadPage() {
       <PageHeader title="Upload Leads" description="Import leads from an Excel or CSV file" />
 
       <div className="max-w-2xl space-y-6">
-        {/* File Upload */}
         <Card>
           <CardHeader>
             <CardTitle>Select File</CardTitle>
@@ -156,7 +170,7 @@ export default function UploadPage() {
               >
                 <Upload className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
                 <p className="text-sm font-medium">Drag & drop your file here, or click to browse</p>
-                <p className="text-xs text-muted-foreground mt-1">Supports .xlsx, .xls, .csv (max 50MB)</p>
+                <p className="text-xs text-muted-foreground mt-1">Supports .xlsx, .xls, .csv — no size limit</p>
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -187,7 +201,6 @@ export default function UploadPage() {
               </div>
             )}
 
-            {/* Product selector */}
             <div className="space-y-2">
               <Label>Product</Label>
               <Select
@@ -204,7 +217,6 @@ export default function UploadPage() {
               </Select>
             </div>
 
-            {/* Upload button */}
             <Button
               onClick={handleUpload}
               disabled={!file || !product || uploading}
@@ -225,7 +237,6 @@ export default function UploadPage() {
           </CardContent>
         </Card>
 
-        {/* Error */}
         {error && (
           <Card className="border-destructive">
             <CardContent className="pt-6">
@@ -240,7 +251,6 @@ export default function UploadPage() {
           </Card>
         )}
 
-        {/* Summary */}
         {summary && (
           <Card className="border-green-200">
             <CardHeader>
