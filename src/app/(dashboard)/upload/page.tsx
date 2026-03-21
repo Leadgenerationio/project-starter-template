@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback, useRef } from 'react'
+import { createClient } from '@/lib/supabase/client'
 import { PageHeader } from '@/components/shared/page-header'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -8,7 +9,8 @@ import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import { PRODUCTS } from '@/lib/constants'
 import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle, Loader2, X } from 'lucide-react'
-import * as XLSX from 'xlsx'
+
+const CHUNK_SIZE = 40 * 1024 * 1024 // 40MB chunks (under Supabase's 50MB limit)
 
 interface UploadSummary {
   newBuyers: number
@@ -19,8 +21,6 @@ interface UploadSummary {
   duplicateSalesSkipped: number
   totalRows: number
 }
-
-const BATCH_SIZE = 2000
 
 export default function UploadPage() {
   const [file, setFile] = useState<File | null>(null)
@@ -72,66 +72,54 @@ export default function UploadPage() {
     setError('')
     setSummary(null)
 
+    const supabase = createClient()
+    const uploadId = `upload-${Date.now()}`
+    const chunkPaths: string[] = []
+
     try {
-      // Step 1: Parse file in the browser
-      setStatus('Reading file (this may take a moment for large files)...')
+      // Step 1: Upload file in chunks to Supabase Storage
+      const totalChunks = Math.ceil(file.size / CHUNK_SIZE)
       const buffer = await file.arrayBuffer()
-      const workbook = XLSX.read(buffer, { type: 'array', cellDates: true })
-      const sheet = workbook.Sheets[workbook.SheetNames[0]]
-      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' })
 
-      if (rows.length === 0) {
-        const ref = sheet['!ref'] || 'empty'
-        setError(`File contains no data rows. Sheet "${workbook.SheetNames[0]}" range: ${ref}`)
-        setUploading(false)
-        return
-      }
+      for (let i = 0; i < totalChunks; i++) {
+        setStatus(`Uploading chunk ${i + 1} of ${totalChunks}...`)
+        const start = i * CHUNK_SIZE
+        const end = Math.min(start + CHUNK_SIZE, file.size)
+        const chunk = buffer.slice(start, end)
+        const chunkPath = `${uploadId}/chunk-${String(i).padStart(4, '0')}`
 
-      setStatus(`Found ${rows.length.toLocaleString()} rows. Processing...`)
+        const { error: uploadError } = await supabase.storage
+          .from('imports')
+          .upload(chunkPath, chunk, { contentType: 'application/octet-stream' })
 
-      // Step 2: Send rows to API in batches
-      const totalBatches = Math.ceil(rows.length / BATCH_SIZE)
-      const totals: UploadSummary = {
-        newBuyers: 0,
-        existingBuyers: 0,
-        leadsImported: 0,
-        leadsUpdated: 0,
-        salesRecorded: 0,
-        duplicateSalesSkipped: 0,
-        totalRows: rows.length,
-      }
-
-      for (let i = 0; i < rows.length; i += BATCH_SIZE) {
-        const batchNum = Math.floor(i / BATCH_SIZE) + 1
-        setStatus(`Processing batch ${batchNum} of ${totalBatches} (${rows.length.toLocaleString()} rows)...`)
-
-        const batch = rows.slice(i, i + BATCH_SIZE)
-
-        const res = await fetch('/api/upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ rows: batch, product }),
-        })
-
-        const data = await res.json()
-
-        if (!res.ok) {
-          setError(data.error || `Processing failed on batch ${batchNum}`)
-          setUploading(false)
-          return
+        if (uploadError) {
+          throw new Error(`Failed to upload chunk ${i + 1}: ${uploadError.message}`)
         }
 
-        totals.newBuyers += data.newBuyers
-        totals.existingBuyers += data.existingBuyers
-        totals.leadsImported += data.leadsImported
-        totals.leadsUpdated += data.leadsUpdated
-        totals.salesRecorded += data.salesRecorded
-        totals.duplicateSalesSkipped += data.duplicateSalesSkipped
+        chunkPaths.push(chunkPath)
       }
 
-      setSummary(totals)
+      // Step 2: Tell the API to process the chunks
+      setStatus('Processing file (this may take a few minutes for large files)...')
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chunk_paths: chunkPaths, product }),
+      })
+
+      const data = await res.json()
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Processing failed')
+      }
+
+      setSummary(data)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed. Please try again.')
+      // Clean up any uploaded chunks on failure
+      if (chunkPaths.length > 0) {
+        await supabase.storage.from('imports').remove(chunkPaths)
+      }
     } finally {
       setUploading(false)
       setStatus('')

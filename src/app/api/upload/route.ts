@@ -2,6 +2,7 @@ export const maxDuration = 300
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthenticatedOrg } from '@/lib/supabase/auth-helpers'
+import * as XLSX from 'xlsx'
 
 /** Column header aliases (lowercased) → canonical key */
 const HEADER_MAP: Record<string, string> = {
@@ -103,21 +104,55 @@ export async function POST(request: NextRequest) {
 
   const { supabase, orgId } = auth
 
-  // Accept JSON with pre-parsed rows from client-side xlsx
   const body = await request.json()
-  const { rows: rawRows, product } = body
+  const { chunk_paths, product } = body
 
-  if (!rawRows || !Array.isArray(rawRows) || rawRows.length === 0) {
-    return NextResponse.json({ error: 'No data rows provided' }, { status: 400 })
+  if (!chunk_paths || !Array.isArray(chunk_paths) || chunk_paths.length === 0) {
+    return NextResponse.json({ error: 'No file chunks provided' }, { status: 400 })
   }
 
   if (!product || typeof product !== 'string') {
     return NextResponse.json({ error: 'Product is required' }, { status: 400 })
   }
 
-  // Map headers from the raw row objects
+  // Download and reassemble chunks from Supabase Storage
+  let fileBuffer: ArrayBuffer
+  try {
+    const chunks: ArrayBuffer[] = []
+    for (const path of chunk_paths) {
+      const { data, error: dlError } = await supabase.storage
+        .from('imports')
+        .download(path)
+      if (dlError || !data) {
+        return NextResponse.json({ error: `Failed to download chunk: ${path}` }, { status: 500 })
+      }
+      chunks.push(await data.arrayBuffer())
+    }
+
+    // Concatenate chunks
+    const totalSize = chunks.reduce((sum, c) => sum + c.byteLength, 0)
+    const combined = new Uint8Array(totalSize)
+    let offset = 0
+    for (const chunk of chunks) {
+      combined.set(new Uint8Array(chunk), offset)
+      offset += chunk.byteLength
+    }
+    fileBuffer = combined.buffer
+  } catch {
+    return NextResponse.json({ error: 'Failed to reassemble file' }, { status: 500 })
+  }
+
+  // Parse Excel file server-side
   let rows: ParsedRow[]
   try {
+    const workbook = XLSX.read(fileBuffer, { type: 'array', cellDates: true })
+    const sheet = workbook.Sheets[workbook.SheetNames[0]]
+    const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' })
+
+    if (rawRows.length === 0) {
+      return NextResponse.json({ error: 'File contains no data rows' }, { status: 400 })
+    }
+
     const sampleHeaders = Object.keys(rawRows[0])
     const headerMapping: Record<string, string> = {}
     for (const h of sampleHeaders) {
@@ -127,7 +162,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    rows = rawRows.map((raw: Record<string, unknown>) => {
+    rows = rawRows.map((raw) => {
       const mapped: Record<string, unknown> = {}
       for (const [origHeader, canonicalKey] of Object.entries(headerMapping)) {
         mapped[canonicalKey] = raw[origHeader]
@@ -150,9 +185,13 @@ export async function POST(request: NextRequest) {
         sold_tag: cellToString(mapped.sold_tag) || null,
       }
     })
-  } catch {
-    return NextResponse.json({ error: 'Failed to parse row data' }, { status: 400 })
+  } catch (err) {
+    console.error('Failed to parse Excel:', err)
+    return NextResponse.json({ error: 'Failed to parse Excel file' }, { status: 400 })
   }
+
+  // Clean up chunks from storage
+  await supabase.storage.from('imports').remove(chunk_paths)
 
   // ===== Step 2: Extract and deduplicate buyers =====
   const buyerNamesSet = new Map<string, string>()
