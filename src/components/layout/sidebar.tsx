@@ -11,7 +11,6 @@ const navigation = [
   { name: 'Buyers', href: '/buyers', icon: UserCheck },
   { name: 'Sell Leads', href: '/orders', icon: ShoppingCart },
   { name: 'Order History', href: '/orders/history', icon: History },
-  { name: 'Import', href: '/leads/import', icon: Upload },
   { name: 'Upload Leads', href: '/upload', icon: FileUp },
   { name: 'Settings', href: '/settings', icon: Settings },
 ]

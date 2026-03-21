@@ -9,7 +9,7 @@ import { useOrg } from '@/providers/org-provider'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel } from '@/components/ui/dropdown-menu'
 import { NotificationBell } from '@/components/notifications/notification-bell'
 import { cn } from '@/lib/utils/cn'
-import { LayoutDashboard, Users, UserCheck, ShoppingCart, Settings, Upload, History, LogOut, User, Menu, X } from 'lucide-react'
+import { LayoutDashboard, Users, UserCheck, ShoppingCart, Settings, Upload, History, FileUp, LogOut, User, Menu, X } from 'lucide-react'
 
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
@@ -17,7 +17,7 @@ const navigation = [
   { name: 'Buyers', href: '/buyers', icon: UserCheck },
   { name: 'Sell Leads', href: '/orders', icon: ShoppingCart },
   { name: 'History', href: '/orders/history', icon: History },
-  { name: 'Import', href: '/leads/import', icon: Upload },
+  { name: 'Upload Leads', href: '/upload', icon: FileUp },
   { name: 'Settings', href: '/settings', icon: Settings },
 ]
 
