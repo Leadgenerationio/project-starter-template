@@ -105,7 +105,7 @@ export async function POST(request: NextRequest) {
   const { supabase, orgId } = auth
 
   const body = await request.json()
-  const { chunk_paths, product } = body
+  const { chunk_paths, product, column_mapping } = body
 
   if (!chunk_paths || !Array.isArray(chunk_paths) || chunk_paths.length === 0) {
     return NextResponse.json({ error: 'No file chunks provided' }, { status: 400 })
@@ -113,6 +113,10 @@ export async function POST(request: NextRequest) {
 
   if (!product || typeof product !== 'string') {
     return NextResponse.json({ error: 'Product is required' }, { status: 400 })
+  }
+
+  if (!column_mapping || typeof column_mapping !== 'object') {
+    return NextResponse.json({ error: 'Column mapping is required' }, { status: 400 })
   }
 
   // Download and reassemble chunks from Supabase Storage
@@ -146,71 +150,44 @@ export async function POST(request: NextRequest) {
   let rows: ParsedRow[]
   try {
     const workbook = XLSX.read(fileBuffer, { type: 'array', cellDates: true })
-    const sheetName = workbook.SheetNames[0]
-    const sheet = workbook.Sheets[sheetName]
-    const ref = sheet['!ref'] || 'none'
+    const sheet = workbook.Sheets[workbook.SheetNames[0]]
 
-    console.log(`Sheet "${sheetName}", ref: ${ref}, sheets: ${workbook.SheetNames.join(', ')}`)
+    // Get raw arrays and find header row (same logic as preview)
+    const rawArrays = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1 })
 
-    // Try default parsing first
-    let rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' })
-
-    // If no rows found, the header row might not be row 1.
-    // Try raw mode to find where data starts.
-    if (rawRows.length === 0) {
-      const rawArrays = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1 })
-      console.log(`sheet_to_json returned 0 rows. Raw arrays: ${rawArrays.length} rows. First 3:`, JSON.stringify(rawArrays.slice(0, 3)))
-
-      // Find the header row by looking for a row with multiple non-empty string values
-      let headerRowIdx = -1
-      for (let i = 0; i < Math.min(rawArrays.length, 20); i++) {
-        const row = rawArrays[i] as unknown[]
-        const nonEmpty = row.filter((c) => c !== null && c !== undefined && String(c).trim() !== '').length
-        if (nonEmpty >= 3) {
-          headerRowIdx = i
-          break
-        }
-      }
-
-      if (headerRowIdx >= 0 && headerRowIdx < rawArrays.length - 1) {
-        console.log(`Found header at row ${headerRowIdx}:`, JSON.stringify(rawArrays[headerRowIdx]))
-        // Re-parse with the correct header row
-        const headers = (rawArrays[headerRowIdx] as unknown[]).map((h) => String(h ?? '').trim())
-        const dataRows = rawArrays.slice(headerRowIdx + 1)
-        rawRows = dataRows
-          .filter((row) => (row as unknown[]).some((c) => c !== null && c !== undefined && String(c).trim() !== ''))
-          .map((row) => {
-            const obj: Record<string, unknown> = {}
-            for (let c = 0; c < headers.length; c++) {
-              if (headers[c]) {
-                obj[headers[c]] = (row as unknown[])[c] ?? ''
-              }
-            }
-            return obj
-          })
-        console.log(`Re-parsed: ${rawRows.length} data rows`)
+    let headerRowIdx = 0
+    for (let i = 0; i < Math.min(rawArrays.length, 20); i++) {
+      const row = rawArrays[i] as unknown[]
+      const nonEmpty = row.filter((c) => c !== null && c !== undefined && String(c).trim() !== '').length
+      if (nonEmpty >= 3) {
+        headerRowIdx = i
+        break
       }
     }
 
-    if (rawRows.length === 0) {
-      return NextResponse.json({ error: `File contains no data rows. Sheet: "${sheetName}", range: ${ref}` }, { status: 400 })
+    const headers = (rawArrays[headerRowIdx] as unknown[]).map((h) => String(h ?? '').trim())
+    const dataArrays = rawArrays.slice(headerRowIdx + 1).filter((row) =>
+      (row as unknown[]).some((c) => c !== null && c !== undefined && String(c).trim() !== '')
+    )
+
+    if (dataArrays.length === 0) {
+      return NextResponse.json({ error: 'File contains no data rows' }, { status: 400 })
     }
 
-    console.log(`Processing ${rawRows.length} rows. Sample headers:`, Object.keys(rawRows[0]).join(', '))
-
-    const sampleHeaders = Object.keys(rawRows[0])
-    const headerMapping: Record<string, string> = {}
-    for (const h of sampleHeaders) {
-      const mapped = normalizeHeader(h)
-      if (mapped) {
-        headerMapping[h] = mapped
-      }
+    // column_mapping: { leadvault_field: "File Column Header", ... }
+    // Invert to: file_header_index → leadvault_field
+    const headerIndexMap: Record<number, string> = {}
+    for (const [field, fileHeader] of Object.entries(column_mapping as Record<string, string>)) {
+      if (!fileHeader) continue
+      const idx = headers.indexOf(fileHeader)
+      if (idx >= 0) headerIndexMap[idx] = field
     }
 
-    rows = rawRows.map((raw) => {
+    rows = dataArrays.map((rawRow) => {
+      const row = rawRow as unknown[]
       const mapped: Record<string, unknown> = {}
-      for (const [origHeader, canonicalKey] of Object.entries(headerMapping)) {
-        mapped[canonicalKey] = raw[origHeader]
+      for (const [idxStr, field] of Object.entries(headerIndexMap)) {
+        mapped[field] = row[parseInt(idxStr, 10)] ?? ''
       }
 
       return {
