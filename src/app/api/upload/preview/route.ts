@@ -35,15 +35,25 @@ export async function POST(request: NextRequest) {
     }
 
     // Parse workbook
+    console.log(`Reassembled file: ${combined.byteLength} bytes`)
     const workbook = XLSX.read(combined.buffer, { type: 'array', cellDates: true })
+    console.log(`Sheets: ${workbook.SheetNames.join(', ')}`)
     const sheetName = workbook.SheetNames[0]
     const sheet = workbook.Sheets[sheetName]
+    console.log(`Sheet "${sheetName}" ref: ${sheet['!ref'] || 'none'}`)
 
     // Get raw arrays to find the header row
     const rawArrays = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1 })
+    console.log(`Raw arrays: ${rawArrays.length} rows`)
 
     if (rawArrays.length === 0) {
-      return NextResponse.json({ error: 'File is empty' }, { status: 400 })
+      // Try other sheets
+      const sheetInfo = workbook.SheetNames.map((n) => `"${n}" ref=${workbook.Sheets[n]['!ref'] || 'none'}`).join(', ')
+      return NextResponse.json({ error: `Sheet "${sheetName}" has no data. Sheets: ${sheetInfo}` }, { status: 400 })
+    }
+
+    if (rawArrays.length > 0) {
+      console.log('First 3 raw rows:', JSON.stringify(rawArrays.slice(0, 3)))
     }
 
     // Find header row: first row with 3+ non-empty cells
