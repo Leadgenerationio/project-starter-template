@@ -145,8 +145,14 @@ export default function UploadPage() {
         body: JSON.stringify({ chunk_paths: paths }),
       })
 
+      if (!res.ok) {
+        if (res.status === 504 || res.status === 502 || res.headers.get('content-type')?.includes('text/html')) {
+          throw new Error('File is too large to process as .xlsx. Please save it as CSV in Excel (File > Save As > CSV) and upload the CSV instead.')
+        }
+        const data = await res.json()
+        throw new Error(data.error || 'Preview failed')
+      }
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Preview failed')
 
       setPreview(data)
 
@@ -183,8 +189,14 @@ export default function UploadPage() {
         body: JSON.stringify({ chunk_paths: chunkPaths, product, column_mapping: mapping }),
       })
 
+      if (!res.ok) {
+        if (res.status === 504 || res.status === 502 || res.headers.get('content-type')?.includes('text/html')) {
+          throw new Error('Processing timed out. Try saving as CSV in Excel (File > Save As > CSV) and upload the CSV instead.')
+        }
+        const errData = await res.json()
+        throw new Error(errData.error || 'Processing failed')
+      }
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Processing failed')
 
       setSummary(data)
       setStep('done')
