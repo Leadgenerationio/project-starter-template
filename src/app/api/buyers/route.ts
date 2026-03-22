@@ -14,7 +14,7 @@ export async function GET() {
     .from('buyers')
     .select('*')
     .eq('org_id', orgId)
-    .order('created_at', { ascending: false })
+    .order('company_name', { ascending: true })
 
   if (buyersError) {
     console.error('Failed to fetch buyers:', buyersError.message)
