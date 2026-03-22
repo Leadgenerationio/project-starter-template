@@ -36,7 +36,7 @@ export async function updateSession(request: NextRequest) {
   const pathname = request.nextUrl.pathname
 
   // Allow public routes
-  const publicRoutes = ['/login', '/register', '/forgot-password', '/api/health', '/api/auth']
+  const publicRoutes = ['/login', '/register', '/forgot-password', '/api/health', '/api/auth', '/api/leads/ingest']
   const isPublicRoute = publicRoutes.some((route) => pathname.startsWith(route))
   const isInviteRoute = pathname.startsWith('/invite/')
   const isMfaRoute = pathname === '/mfa-verify'

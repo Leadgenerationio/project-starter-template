@@ -14,6 +14,7 @@ import { formatDateTime } from '@/lib/utils/format'
 import { Bell, Check } from 'lucide-react'
 import Link from 'next/link'
 import { MfaEnrollment } from '@/components/settings/mfa-enrollment'
+import { ApiKeysCard } from '@/components/settings/api-keys-card'
 
 export default function SettingsPage() {
   const { org } = useOrg()
@@ -97,6 +98,8 @@ export default function SettingsPage() {
         </Card>
 
         <MfaEnrollment />
+
+        <ApiKeysCard />
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">

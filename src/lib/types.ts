@@ -135,6 +135,15 @@ export interface Notification {
   created_at: string
 }
 
+export interface ApiKey {
+  id: string
+  org_id: string
+  name: string
+  created_at: string
+  last_used_at: string | null
+  is_active: boolean
+}
+
 export interface DashboardStats {
   total_leads: number
   eligible_leads: number
