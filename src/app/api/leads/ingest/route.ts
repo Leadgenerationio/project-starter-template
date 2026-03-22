@@ -6,19 +6,33 @@ import type { IngestLeadInput } from '@/lib/validations/ingest'
 
 const BATCH_SIZE = 200
 
-export async function POST(request: NextRequest) {
+// Shared handler for both GET (query params) and POST (JSON body)
+async function handleIngest(request: NextRequest) {
   // Authenticate via API key
   const auth = await getAuthenticatedOrgByApiKey(request)
   if ('error' in auth) return auth.error
 
   const { orgId } = auth
 
-  // Parse body
+  // Parse lead data from query params (GET) or JSON body (POST)
   let body: unknown
-  try {
-    body = await request.json()
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
+  let isSingle = true
+
+  if (request.method === 'GET') {
+    // Build lead object from query parameters
+    const params = request.nextUrl.searchParams
+    const lead: Record<string, string> = {}
+    for (const [key, value] of params.entries()) {
+      lead[key] = value
+    }
+    body = lead
+  } else {
+    try {
+      body = await request.json()
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
+    }
+    isSingle = !Array.isArray(body)
   }
 
   const parsed = ingestRequestSchema.safeParse(body)
@@ -32,7 +46,6 @@ export async function POST(request: NextRequest) {
     }, { status: 400 })
   }
 
-  const isSingle = !Array.isArray(body)
   const leads: IngestLeadInput[] = Array.isArray(parsed.data) ? parsed.data : [parsed.data]
 
   const supabase = createAdminClient()
@@ -207,4 +220,14 @@ export async function POST(request: NextRequest) {
     },
     results,
   }, { status: 200 })
+}
+
+// GET — accepts lead fields as query parameters (for LeadByte, Zapier, etc.)
+export async function GET(request: NextRequest) {
+  return handleIngest(request)
+}
+
+// POST — accepts JSON body (single lead or batch array)
+export async function POST(request: NextRequest) {
+  return handleIngest(request)
 }
